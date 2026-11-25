@@ -10,6 +10,8 @@ Entry: `GlowWidgets.tsx`
 
 Install: `npx expo install react-native-svg`
 
+Built and tested on Expo SDK 54 (React Native 0.81, Reanimated 4.1, React Native Skia 2.2). In an SDK 54 project `npx expo install` picks matching versions. Newer SDKs are not verified yet.
+
 ## Web
 
 Open `web/05_motion_glow_widgets.html` in a browser. It is a self-contained reference build of the same motion and timing.

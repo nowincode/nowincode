@@ -10,6 +10,8 @@ Entry: `15_motion_dust_delete.tsx`
 
 Install: `npx expo install @shopify/react-native-skia react-native-reanimated`
 
+Built and tested on Expo SDK 54 (React Native 0.81, Reanimated 4.1, React Native Skia 2.2). In an SDK 54 project `npx expo install` picks matching versions. Newer SDKs are not verified yet.
+
 ## Web
 
 Open `web/15_motion_dust_delete.html` in a browser. It is a self-contained reference build of the same motion and timing.
