@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code Input Morph</title>
+<style>
+  :root { --bg: #F5F4F0; --muted: #9a988f; --chip: #ebe9e4; --ink: #121211; }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+  body { font-family: -apple-system, "SF Pro Text", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  #stage { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+  #shell { position: absolute; top: 0; background: #FDFDFD; cursor: default;
+    box-shadow: 0 0 0 1px rgba(0,0,0,.072), 0 1px 2px rgba(0,0,0,.05), 0 5px 13px rgba(0,0,0,.065); }
+  #clip { position: absolute; inset: 0; overflow: hidden; }
+  .layer { position: absolute; inset: 0; transform-origin: 50% 50%; will-change: filter, opacity; }
+  .pill { position: absolute; }
+  .row { position: absolute; top: 0; height: 100%; }
+  .txt { position: absolute; top: 0; height: 100%; display: flex; align-items: center; white-space: pre;
+    font-weight: 600; font-size: 13px; letter-spacing: -0.2px; }
+  .icon { position: absolute; display: block; }
+  .cell { position: absolute; }
+  .digit { position: absolute; top: 0; height: 100%; width: 30px; margin-left: -15px; display: flex; align-items: center;
+    justify-content: center; font-weight: 600; font-size: 17px; font-variant-numeric: tabular-nums; }
+  #ring { position: absolute; box-shadow: inset 0 0 0 1.75px #181716; pointer-events: none; } /* Chrome floors fractional borders to 1px */
+  #caret { position: absolute; background: #181716; border-radius: 1px; }
+  #code { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; left: -10px; }
+  #ui { position: fixed; left: 0; right: 0; bottom: 22px; display: flex; gap: 10px; justify-content: center; align-items: center;
+    font-size: 12px; color: var(--muted); }
+  #ui button { font: inherit; color: var(--ink); background: var(--chip); border: 0; border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+  #ui .on { background: var(--ink); color: #fff; }
+</style>
+<!-- nic:screen-mode: ?screen renders only the app screen, edge to edge (nowincode capture) -->
+<script>if(new URLSearchParams(location.search).has('screen')){document.documentElement.classList.add('nic-screen');document.addEventListener('DOMContentLoaded',function(){var d=document.createElement('div');d.id='nic-bg';document.body.prepend(d)})}</script>
+<style>html.nic-screen #nic-bg{position:fixed;inset:0}</style>
+<style>html.nic-screen #ui{display:none!important}</style>
+<!-- /nic:screen-mode -->
+</head>
+<body>
+<div id="stage">
+  <div id="shell">
+    <div id="clip">
+      <div class="layer" id="Lenter">
+        <div class="pill" id="enterPill"></div>
+        <div class="row" id="enterRow">
+          <svg class="icon" id="lock" viewBox="0 0 10.7 11.7" width="10.7" height="11.7" fill="none" stroke="#121211" stroke-width="1.45" stroke-linecap="round">
+            <path d="M2.85 5.05V3.35a2.5 2.5 0 0 1 5 0V5.05"/>
+            <rect x="0.73" y="5.05" width="9.24" height="5.92" rx="1.9"/>
+          </svg>
+          <div class="txt" id="enterTxt" style="color:#121211">Enter code</div>
+        </div>
+      </div>
+      <div class="layer" id="Lstatus">
+        <div class="pill" id="statusPill"></div>
+        <div class="row" id="statusRow">
+          <svg class="icon" id="spinner" viewBox="0 0 11 11" width="11" height="11" fill="none" stroke-width="1.5">
+            <circle cx="5.5" cy="5.5" r="4.75" stroke="#B4B3AE"/>
+            <circle id="arc" cx="5.5" cy="5.5" r="4.75" stroke="#1C1C1A" stroke-linecap="round"/>
+          </svg>
+          <svg class="icon" id="check" viewBox="0 0 11 11" width="11" height="11" fill="none" stroke="#121211" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1.6 5.9 4.25 8.4 9.4 2.7"/>
+          </svg>
+          <div class="txt" id="sVerif">Verif</div>
+          <div class="txt" id="sYing">ying</div>
+          <div class="txt" id="sIed">ied</div>
+        </div>
+      </div>
+      <div class="layer" id="Lotp">
+        <div id="cells"></div>
+        <div id="digits"></div>
+        <div id="ring"></div>
+        <div id="caret"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+<div id="ui"><button id="bDemo" class="on">Demo</button><button id="bTry">Try it</button><span id="hint">correct code: 123456</span></div>
+
+<script src="shared/code_input_core.js"></script>
+<script>
+const CI = window.CodeInput, L = CI.L;
+const $ = (id) => document.getElementById(id);
+const q = new URLSearchParams(location.search);
+const FROZEN = q.has('t') ? +q.get('t') : null;
+
+// ---------- static nodes ----------
+const cellEls = [], digitPool = [];
+for (let i = 0; i < L.N; i++) { const c = document.createElement('div'); c.className = 'cell'; $('cells').appendChild(c); cellEls.push(c); }
+for (let i = 0; i < 12; i++) { const d = document.createElement('div'); d.className = 'digit'; $('digits').appendChild(d); digitPool.push(d); }
+const shell = $('shell'), clip = $('clip');
+shell.style.height = L.H + 'px'; shell.style.borderRadius = clip.style.borderRadius = L.H / 2 + 'px';
+for (const id of ['enterPill', 'statusPill']) Object.assign($(id).style, { top: L.PAD + 'px', left: L.PAD + 'px', height: L.CELL_H + 'px', borderRadius: L.CELL_H / 2 + 'px' });
+$('enterPill').style.background = CI.C.cell;
+Object.assign($('lock').style, { left: 0, top: (L.H - L.LOCK_H) / 2 + 'px' });
+$('enterTxt').style.left = L.LOCK_W + L.ENTER_GAP + 'px';
+for (const id of ['spinner', 'check']) Object.assign($(id).style, { left: 0, top: (L.H - L.ICON_BOX) / 2 + 'px' });
+$('sVerif').style.left = L.ICON_BOX + L.STATUS_GAP + 'px';
+$('sYing').style.left = $('sIed').style.left = L.ICON_BOX + L.STATUS_GAP + L.VERIF_ADV + 'px';
+Object.assign($('ring').style, { top: L.PAD + 'px', width: L.CELL_W + 'px', height: L.CELL_H + 'px' });
+Object.assign($('caret').style, { top: (L.H - L.CARET_H) / 2 + 'px', width: L.CARET_W + 'px', height: L.CARET_H + 'px' });
+const ARC_C = 2 * Math.PI * 4.75;
+
+const blur = (b) => (b > 0.05 ? `blur(${b.toFixed(2)}px)` : 'none');
+const px = (v) => v.toFixed(3) + 'px';
+
+function render(f) {
+  shell.style.width = px(f.W); shell.style.left = px(-f.W / 2 + f.x); shell.style.top = px(-L.H / 2);
+  const look = (el, l, scale) => { el.style.opacity = l.op.toFixed(3); el.style.filter = blur(l.blur); el.style.visibility = l.op < 0.003 ? 'hidden' : 'visible'; if (scale) el.style.transform = `scale(${scale.toFixed(4)})`; };
+  look($('Lenter'), f.layers.enter, f.layers.enter.scale); look($('Lotp'), f.layers.otp); look($('Lstatus'), f.layers.status);
+  // pills
+  $('enterPill').style.width = $('statusPill').style.width = px(f.W - 2 * L.PAD);
+  $('enterRow').style.left = px(f.enter.rowX);
+  const s = f.statusPill;
+  $('statusPill').style.background = s.bg; $('statusRow').style.left = px(s.rowX);
+  for (const [id, seg] of [['sVerif', s.verif], ['sYing', s.ying], ['sIed', s.ied]]) { const el = $(id); el.style.color = s.fg; el.style.opacity = seg.op.toFixed(3); el.style.filter = blur(seg.blur); }
+  const sp = $('spinner'); sp.style.opacity = s.spinner.op.toFixed(3); sp.style.filter = blur(s.spinner.blur);
+  const arc = $('arc'); arc.setAttribute('stroke-dasharray', `${(s.spinner.arc / 360 * ARC_C).toFixed(3)} ${ARC_C.toFixed(3)}`);
+  arc.setAttribute('transform', `rotate(${(s.spinner.angle - 90).toFixed(2)} 5.5 5.5)`);
+  const ck = $('check'); ck.setAttribute('stroke', s.fg); ck.style.opacity = s.check.op.toFixed(3); ck.style.filter = blur(s.check.blur); ck.style.transform = `scale(${s.check.scale.toFixed(3)})`;
+  // otp
+  f.cells.forEach((c, i) => Object.assign(cellEls[i].style, { left: px(c.x), top: L.PAD + 'px', width: px(c.w), height: L.CELL_H + 'px', background: c.bg, filter: blur(c.blur), opacity: c.op.toFixed(3),
+    borderRadius: `${c.rl}px ${c.rr}px ${c.rr}px ${c.rl}px` }));
+  digitPool.forEach((el, i) => {
+    const d = f.digits[i];
+    if (!d) { el.style.display = 'none'; return; }
+    Object.assign(el.style, { display: 'flex', left: px(d.cx), transform: `translateY(${d.y.toFixed(3)}px)`, opacity: d.op.toFixed(3), filter: blur(d.blur), color: d.color });
+    if (el.textContent !== d.d) el.textContent = d.d;
+  });
+  const r = f.ring, re = $('ring');
+  Object.assign(re.style, { left: px(r.x), opacity: r.op.toFixed(3), filter: blur(r.blur), borderRadius: `${r.rl.toFixed(2)}px ${r.rr.toFixed(2)}px ${r.rr.toFixed(2)}px ${r.rl.toFixed(2)}px` });
+  Object.assign($('caret').style, { left: px(f.caret.cx - L.CARET_W / 2), opacity: f.caret.op });
+}
+
+// ---------- scale to the source framing (component drawn at 3x in a 1494x1018 frame) ----------
+function fit() {
+  const s = Math.min(innerWidth / 1494, innerHeight / 1018) * 3;
+  $('stage').style.transform = `scale(${s.toFixed(4)})`;
+}
+addEventListener('resize', fit); fit();
+
+// ---------- modes ----------
+let mode = 'demo', events = CI.demoEvents(), t0 = performance.now(), resultFor = null, resetFor = null;
+const now = () => performance.now() - t0;
+function setMode(m) {
+  mode = m; t0 = performance.now(); resultFor = resetFor = null;
+  events = m === 'demo' ? CI.demoEvents() : [];
+  $('bDemo').classList.toggle('on', m === 'demo'); $('bTry').classList.toggle('on', m === 'try');
+}
+const push = (type, extra) => { if (mode !== 'try') setMode('try'); events.push(Object.assign({ t: now(), type }, extra)); };
+$('bDemo').onclick = () => setMode('demo');
+$('bTry').onclick = () => { setMode('try'); };
+shell.addEventListener('click', () => {
+  const f = CI.frame(events, mode === 'demo' ? now() % CI.DEMO_PERIOD : now());
+  if (mode === 'demo' || f.mode === 'enter') { if (mode === 'demo') setMode('try'); push('open'); $('code').focus(); }
+  else if (f.mode === 'otp') $('code').focus();
+  else if (f.status === 'verified') push('reset');
+});
+addEventListener('keydown', (e) => {
+  if (mode !== 'try') return;
+  if (/^[0-9]$/.test(e.key)) { push('digit', { d: e.key }); e.preventDefault(); }
+  else if (e.key === 'Backspace') { push('back'); e.preventDefault(); }
+  else if (e.key === 'Escape') push('cancel');
+  else if (e.key === 'Enter') { const f = CI.frame(events, now()); if (f.mode === 'enter') { push('open'); $('code').focus(); } }
+});
+addEventListener('paste', (e) => {
+  if (mode !== 'try') return;
+  const s = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6), t = now();
+  s.split('').forEach((d, i) => events.push({ t: t + i * 45, type: 'digit', d }));
+  e.preventDefault();
+});
+$('code').addEventListener('input', (e) => { e.target.value = ''; });
+
+function tick() {
+  let t = now();
+  if (mode === 'demo') t %= CI.DEMO_PERIOD;
+  if (FROZEN !== null) t = FROZEN;
+  const f = CI.frame(events, t);
+  if (mode === 'try') {
+    // preview harness: fake a 1.2s server check; verified pill resets itself after 2.4s
+    if (f.submittedAt !== null && resultFor !== f.submittedAt) { resultFor = f.submittedAt; events.push({ t: f.submittedAt + 1200, type: 'result', ok: f.code === '123456' }); }
+    if (f.status === 'verified' && resetFor !== resultFor) { resetFor = resultFor; events.push({ t: t + 2400, type: 'reset' }); }
+    const last = events.reduce((a, e) => Math.max(a, e.t), -1e9);
+    if (f.mode === 'enter' && events.length && t - last > 1500) events = events.filter((e) => e.t > t);
+  }
+  render(f);
+  window.__ci = f;
+  if (FROZEN === null) requestAnimationFrame(tick);
+}
+tick();
+</script>
+</body>
+</html>

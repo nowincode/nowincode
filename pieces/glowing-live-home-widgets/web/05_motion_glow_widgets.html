@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glow Widgets</title>
+<style>
+  :root { --bg: #060508; }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+  body { font-family: -apple-system, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  #stage { position: absolute; left: 0; top: 0; width: 720px; height: 450px; transform-origin: 0 0; }
+  .card { position: absolute; }
+  .card svg { position: absolute; overflow: visible; }
+  .t { position: absolute; white-space: pre; font-variation-settings: 'opsz' 28; }
+  #ui { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 10px; align-items: center;
+        padding: 7px 12px; border-radius: 999px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
+        color: #B8B3C0; font: 500 12px -apple-system, system-ui, sans-serif; user-select: none; }
+  #ui button { all: unset; cursor: pointer; padding: 3px 9px; border-radius: 999px; background: rgba(255,255,255,0.08); color: #E8E4EE; }
+  #ui button.on { background: rgba(110,231,183,0.18); color: #A7F3D0; }
+  #ui input[type=range] { width: 180px; accent-color: #8B5CF6; }
+  #ui .tm { font-variant-numeric: tabular-nums; width: 42px; text-align: right; }
+  @media (max-width: 520px) { #ui input[type=range] { width: 110px; } }
+</style>
+<!-- nic:screen-mode: ?screen renders only the app screen, edge to edge (nowincode capture) -->
+<script>if(new URLSearchParams(location.search).has('screen')){document.documentElement.classList.add('nic-screen');addEventListener('DOMContentLoaded',()=>{const d=document.createElement('div');d.id='nic-fill';document.body.prepend(d)})}</script>
+<style>html.nic-screen,html.nic-screen body{margin:0!important;padding:0!important;overflow:clip!important}#nic-fill{display:none}html.nic-screen #nic-fill{display:block;position:fixed;inset:0;z-index:-1;background:transparent}html.nic-screen body{position:relative!important;z-index:0!important}html.nic-screen body>*:not(script,style,#nic-fill){position:fixed!important}</style>
+<!-- /nic:screen-mode -->
+</head>
+<body>
+<div id="stage"></div>
+<div id="ui">
+  <button id="play">Pause</button>
+  <input id="scrub" type="range" min="0" max="5" step="0.001" value="0">
+  <span class="tm" id="tm">0.00s</span>
+  <button id="float" title="展示层漂浮（原片的卡片浮动，非 UI，默认关）">Float</button>
+</div>
+<script src="core.js"></script>
+<script>
+(function () {
+  var G = window.GlowCore, Q = new URLSearchParams(location.search);
+  var KINDS = ['energy', 'thermo', 'music'];
+  var stage = document.getElementById('stage');
+  var frozen = Q.has('t') ? parseFloat(Q.get('t')) : null;
+  var useFloat = Q.get('float') === '1';
+  if (Q.get('ui') === '0') document.getElementById('ui').style.display = 'none';
+
+  // 按三张卡的包围盒（含外晕余量）适配视口；?k= 时按整张 720×450 画布定位（对拍 / 截图与原片 1:1）
+  var BOX = { x: 108, y: 8, w: 504, h: 434 };
+  function fit() {
+    var uiH = Q.get('ui') === '0' ? 0 : 56, k, ox, oy;
+    if (Q.has('k')) {
+      k = parseFloat(Q.get('k'));
+      ox = (innerWidth / k - G.CANVAS.w) / 2; oy = (innerHeight / k - G.CANVAS.h) / 2;
+    } else {
+      k = Math.min(innerWidth / BOX.w, (innerHeight - uiH) / BOX.h);
+      ox = (innerWidth / k - BOX.w) / 2 - BOX.x; oy = ((innerHeight - uiH) / k - BOX.h) / 2 - BOX.y;
+    }
+    stage.style.zoom = k;
+    stage.style.left = ox + 'px';
+    stage.style.top = oy + 'px';
+  }
+  addEventListener('resize', fit); fit();
+
+  var els = {};
+  KINDS.forEach(function (kind) {
+    var c = G.CARDS[kind], d = document.createElement('div');
+    d.className = 'card'; d.id = 'c-' + kind;
+    d.style.left = c.x + 'px'; d.style.top = c.y + 'px'; d.style.width = c.w + 'px'; d.style.height = c.h + 'px';
+    var B = c.bleed, svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', c.w + 2 * B); svg.setAttribute('height', c.h + 2 * B);
+    svg.setAttribute('viewBox', [-B, -B, c.w + 2 * B, c.h + 2 * B].join(' '));
+    svg.style.left = -B + 'px'; svg.style.top = -B + 'px';
+    d.appendChild(svg);
+    var tx = document.createElement('div'); tx.className = 'texts'; d.appendChild(tx);
+    stage.appendChild(d);
+    els[kind] = { root: d, svg: svg, texts: tx };
+  });
+
+  function stopsHTML(s) { return s.map(function (x) { return '<stop offset="' + x[0] + '" stop-color="' + x[1] + '" stop-opacity="' + x[2] + '"/>'; }).join(''); }
+  function defHTML(uid, g) {
+    var id = uid + '-' + g.id, u = g.units === 'obb' ? 'objectBoundingBox' : 'userSpaceOnUse';
+    if (g.kind === 'linear') return '<linearGradient id="' + id + '" gradientUnits="' + u + '" x1="' + g.x1 + '" y1="' + g.y1 + '" x2="' + g.x2 + '" y2="' + g.y2 + '">' + stopsHTML(g.stops) + '</linearGradient>';
+    return '<radialGradient id="' + id + '" gradientUnits="' + u + '" cx="' + g.cx + '" cy="' + g.cy + '" r="' + g.r + '">' + stopsHTML(g.stops) + '</radialGradient>';
+  }
+  function shapeHTML(uid, s, i) {
+    var a = ['d="' + s.d + '"', 'fill="' + (s.fill || 'none') + '"'];
+    if (s.stroke) a.push('stroke="' + s.stroke + '"', 'stroke-width="' + s.w + '"');
+    if (s.cap) a.push('stroke-linecap="' + s.cap + '"');
+    if (s.join) a.push('stroke-linejoin="' + s.join + '"');
+    if (s.dash) a.push('stroke-dasharray="' + s.dash.join(' ') + '"');
+    if (s.op != null && s.op !== 1) a.push('opacity="' + s.op + '"');
+    if (s.clip) a.push('clip-path="url(#' + uid + '-clip)"');
+    if (s.clipArt) a.push('clip-path="url(#' + uid + '-artclip)"');
+    return '<path data-i="' + i + '" ' + a.join(' ') + '/>';
+  }
+  function groupHTML(uid, s, i) {
+    // 剪裁在外层（不随旋转），旋转在内层
+    return '<g data-i="' + i + '" data-group="' + s.group + '"' + (s.clipArt ? ' clip-path="url(#' + uid + '-artclip)"' : '') + '><g transform="rotate(' + s.rot + ' ' + s.cx + ' ' + s.cy + ')">' +
+      s.shapes.map(function (w) { return '<path d="' + w.d + '" fill="' + w.fill + '"/>'; }).join('') + '</g></g>';
+  }
+  function render(t) {
+    KINDS.forEach(function (kind) {
+      var uid = kind[0], L = G.widget(kind, t, uid), E = els[kind];
+      var defs = L.defs.map(function (g) { return defHTML(uid, g); }).join('') +
+        '<clipPath id="' + uid + '-clip"><path d="' + L.clip + '"/></clipPath>' +
+        (L.artClip ? '<clipPath id="' + uid + '-artclip"><path d="' + L.artClip + '"/></clipPath>' : '');
+      E.svg.innerHTML = '<defs>' + defs + '</defs>' + L.shapes.map(function (s, i) { return s.group ? groupHTML(uid, s, i) : shapeHTML(uid, s, i); }).join('');
+      E.texts.innerHTML = L.texts.map(function (x) {
+        var st = 'left:' + x.x + 'px;top:' + x.y + 'px;font-size:' + x.size + 'px;line-height:' + x.size + 'px;font-weight:' + x.weight +
+          ';color:' + x.color + ';letter-spacing:' + x.ls + 'px;' + (x.op !== 1 ? 'opacity:' + x.op + ';' : '') +
+          (x.align === 'center' ? 'width:' + x.w + 'px;text-align:center;' : '') + (x.tab ? 'font-variant-numeric:tabular-nums;' : '');
+        return '<div class="t" data-key="' + x.key + '" style="' + st + '">' + x.text + '</div>';
+      }).join('');
+      E.root.style.transform = useFloat ? 'translateY(' + G.floatOffset(kind, t).toFixed(3) + 'px)' : '';
+    });
+  }
+  window.__render = render;
+
+  // 播放控制
+  var playBtn = document.getElementById('play'), scrub = document.getElementById('scrub'), tm = document.getElementById('tm'), flBtn = document.getElementById('float');
+  var playing = frozen == null, t0 = performance.now(), base = frozen || 0, cur = base;
+  function sync() { playBtn.textContent = playing ? 'Pause' : 'Play'; flBtn.classList.toggle('on', useFloat); }
+  playBtn.onclick = function () { playing = !playing; base = cur; t0 = performance.now(); sync(); };
+  flBtn.onclick = function () { useFloat = !useFloat; sync(); render(cur); };
+  scrub.oninput = function () { playing = false; cur = base = parseFloat(scrub.value); sync(); render(cur); tm.textContent = cur.toFixed(2) + 's'; };
+  function tick(now) {
+    if (playing) { cur = base + (now - t0) / 1000; scrub.value = cur % G.LOOP; tm.textContent = (cur % G.LOOP).toFixed(2) + 's'; render(cur); }
+    requestAnimationFrame(tick);
+  }
+  sync(); render(cur); tm.textContent = cur.toFixed(2) + 's';
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { window.__ready = true; }); else window.__ready = true;
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

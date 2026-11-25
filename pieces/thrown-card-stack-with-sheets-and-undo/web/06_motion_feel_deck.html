@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feel Deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300..600&family=Geist+Mono:wght@200;300;400&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #ececec; --ink: #1a1a1a; --mute: #8a8a8a; --chip: #ffffff; --chipOn: #1a1a1a; --chipOnInk: #fff; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0d0d0d; --ink: #eee; --mute: #777; --chip: #1c1c1c; --chipOn: #f2a358; --chipOnInk: #1a1208; } }
+  :root[data-theme="dark"] { --bg: #0d0d0d; --ink: #eee; --mute: #777; --chip: #1c1c1c; --chipOn: #f2a358; --chipOnInk: #1a1208; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); font-family: Lexend, system-ui, sans-serif; color: var(--ink); }
+  body { display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+  .stage { position: relative; }
+  .phone { position: relative; width: 417px; height: 876px; border-radius: 66px; background: #0b0b0b; padding: 12px;
+           box-shadow: 0 0 0 1.5px #2a2a2a inset, 0 30px 60px rgba(0,0,0,.25); }
+  #screen { position: relative; width: 393px; height: 852px; border-radius: 55px; overflow: hidden; background: #1e1e1e;
+            user-select: none; -webkit-user-select: none; touch-action: none; cursor: default; }
+  #screen * { position: absolute; }
+  #screen .flow, #screen .flow * { position: static; }
+  .ctrl { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 10; font-size: 12px; }
+  .ctrl button { border: 0; border-radius: 99px; padding: 7px 13px; font: 500 12px Lexend, sans-serif; background: var(--chip); color: var(--ink);
+                 box-shadow: 0 1px 3px rgba(0,0,0,.12); cursor: pointer; }
+  .ctrl button.on { background: var(--chipOn); color: var(--chipOnInk); }
+  body.clean .ctrl { display: none; }
+  body.clean { background: #0b0b0b; }
+  .t { white-space: pre; }
+  .ico { overflow: visible; }
+  canvas { pointer-events: none; }
+</style>
+<!-- nic:screen-mode: ?screen renders only the app screen, edge to edge (nowincode capture) -->
+<script>if(new URLSearchParams(location.search).has('screen'))document.documentElement.classList.add('nic-screen')</script>
+<style>html.nic-screen body{display:block;min-height:0}html.nic-screen .stage{transform:none!important;zoom:1!important}html.nic-screen .phone{transform:none!important;zoom:1!important;width:393px;height:852px;padding:0;border-radius:0;background:none;box-shadow:none}html.nic-screen #screen{border-radius:0}html.nic-screen .ctrl,html.nic-screen .island,html.nic-screen #island{display:none!important}</style>
+<!-- /nic:screen-mode -->
+</head>
+<body>
+<div class="ctrl">
+  <button data-mode="feel" class="on">With feel</button>
+  <button data-mode="flat">Without</button>
+  <button data-demo>Replay demo</button>
+</div>
+<div class="stage"><div class="phone"><div id="screen"></div></div></div>
+
+<script type="module">
+import { SCREEN, C, FONT, L, CARDS, DAYS, STATS0, STAT_LABELS, fmtStats, applyDecision, ICON, WAVE, WAVE_PLAYED,
+         SPR, T, BEZ, DRAG, SHEET_DRAG, clamp, lerp, dragDerived, sheetDragDerived, flyDuration,
+         rowThumbRect, heroRect, digitRoll, cropPlace, flyPos, DEFAULT_V, frozenInit, ASCII_RAMP, ASCII_CELL, flickerAt, FLICKER_MS } from './src/feelCore.js';
+import { ASCII_GRIDS } from './src/asciiGrids.js';
+
+const Q = new URLSearchParams(location.search);
+if (Q.has('clean')) document.body.classList.add('clean');
+let FEEL = Q.get('mode') !== 'flat';
+const IMG = (n) => `assets/img/${n}.jpg`;
+const scr = document.getElementById('screen');
+
+// ---------------- tiny DOM helpers ----------------
+function el(tag, css = {}, parent = scr, attrs = {}) {
+  const e = document.createElement(tag);
+  const { font, ...rest } = css;          // font shorthand first, or it resets line-height
+  if (font) e.style.font = font;
+  Object.assign(e.style, rest);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  parent.appendChild(e);
+  return e;
+}
+function txt(parent, s, css) { const e = el('div', css, parent); e.className = 't'; e.textContent = s; return e; }
+const SVGNS = 'http://www.w3.org/2000/svg';
+function icon(parent, d, size, color, css = {}, fill = false, sw = 1.8) {
+  const s = document.createElementNS(SVGNS, 'svg');
+  s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', size); s.setAttribute('height', size); s.classList.add('ico');
+  Object.assign(s.style, css);
+  const p = document.createElementNS(SVGNS, 'path'); p.setAttribute('d', d);
+  if (fill) { p.setAttribute('fill', color); }
+  else { p.setAttribute('fill', 'none'); p.setAttribute('stroke', color); p.setAttribute('stroke-width', sw); p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round'); }
+  s.appendChild(p); parent.appendChild(s); return s;
+}
+const centerY = (cy, lh) => ({ top: (cy - lh / 2) + 'px', height: lh + 'px', lineHeight: lh + 'px' });
+const grad = (stops, a = '180deg') => `linear-gradient(${a}, ${stops.map(([o, c]) => `${c} ${(o * 100).toFixed(1)}%`).join(', ')})`;
+
+// ---------------- animation engine ----------------
+const V = {};            // animated values
+const AN = new Map();    // active animations
+const TIMERS = [];       // clock-based callbacks
+let clock = 0;
+function bez(x1, y1, x2, y2) {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const X = (t) => ((ax * t + bx) * t + cx) * t, Y = (t) => ((ay * t + by) * t + cy) * t, dX = (t) => (3 * ax * t + 2 * bx) * t + cx;
+  return (x) => { let t = x; for (let i = 0; i < 8; i++) { const d = dX(t); if (Math.abs(d) < 1e-6) break; t -= (X(t) - x) / d; } return Y(clamp(t, 0, 1)); };
+}
+const EASE = { sheet: bez(...BEZ.sheet), fade: bez(...BEZ.fade), out: bez(...BEZ.out), quadOut: (p) => 1 - (1 - p) * (1 - p), lin: (p) => p };
+function set(k, v) { V[k] = v; AN.delete(k); }
+function spring(k, to, cfg, v0, done) {
+  if (!FEEL) { set(k, to); done && done(); return; }
+  const prev = AN.get(k);
+  AN.set(k, { s: 1, to, w: cfg.w, z: cfg.z, v: v0 ?? (prev && prev.s ? prev.v : 0), done });
+}
+function tween(k, to, dur, ease = EASE.fade, delay = 0, done) {
+  if (!FEEL) { set(k, to); done && done(); return; }
+  AN.set(k, { s: 0, from: V[k] ?? 0, to, dur, ease, t: -delay, done });
+}
+function after(sec, fn) { if (!FEEL) { fn(); return; } TIMERS.push({ at: clock + sec, fn }); }
+function step(dt) {
+  clock += dt;
+  for (const [k, a] of AN) {
+    if (a.s) {
+      const n = 4, h = dt / n; let x = V[k] ?? 0;
+      for (let i = 0; i < n; i++) { const acc = -a.w * a.w * (x - a.to) - 2 * a.z * a.w * a.v; a.v += acc * h; x += a.v * h; }
+      V[k] = x;
+      if (Math.abs(x - a.to) < 1e-3 * Math.max(1, Math.abs(a.to)) && Math.abs(a.v) < 1e-2) { V[k] = a.to; AN.delete(k); a.done && a.done(); }
+    } else {
+      a.t += dt; if (a.t < 0) continue;
+      const p = clamp(a.t / a.dur, 0, 1); V[k] = a.from + (a.to - a.from) * a.ease(p);
+      if (p >= 1) { AN.delete(k); a.done && a.done(); }
+    }
+  }
+  for (let i = TIMERS.length - 1; i >= 0; i--) if (TIMERS[i].at <= clock) { const f = TIMERS[i].fn; TIMERS.splice(i, 1); f(); }
+}
+
+// ---------------- state ----------------
+const S = { top: 0, stats: { ...STATS0 }, prevStats: { ...STATS0 }, hist: [], tab: 'deck', day: -1, sheet: false, busy: false, toastText: '' };
+function resetValues() { Object.assign(V, DEFAULT_V); }
+resetValues();
+
+// ---------------- build: status bar ----------------
+const status = el('div', { left: 0, top: 0, width: '393px', height: '54px', zIndex: 60, pointerEvents: 'none' });
+txt(status, '9:41', { left: '32px', width: '60px', textAlign: 'center', ...centerY(L.status.y, 22), font: `600 17px -apple-system, "SF Pro Text", system-ui`, color: '#fff' });
+{ // signal / wifi / battery
+  const s = el('div', { right: '26px', top: '23px', width: '80px', height: '14px' }, status);
+  const sig = el('div', { left: '0', top: '1px', width: '19px', height: '12px' }, s);
+  [4, 6.5, 9, 12].forEach((h, i) => el('div', { left: i * 5 + 'px', bottom: 0, width: '3.2px', height: h + 'px', borderRadius: '1px', background: '#fff' }, sig));
+  icon(s, 'M2.5 9a14 14 0 0 1 19 0M6 12.5a9 9 0 0 1 12 0M9.5 16a4 4 0 0 1 5 0', 17, '#fff', { left: '25px', top: '-2px' }, false, 2.4);
+  const bat = el('div', { left: '48px', top: '0px', width: '25px', height: '13px', borderRadius: '4px', border: '1.2px solid rgba(255,255,255,.45)' }, s);
+  el('div', { left: '1.5px', top: '1.5px', width: '19.5px', height: '7.5px', borderRadius: '2px', background: '#fff' }, bat);
+  el('div', { left: '75px', top: '4.5px', width: '1.6px', height: '4.5px', borderRadius: '1px', background: 'rgba(255,255,255,.45)' }, s);
+}
+
+// ---------------- build: stats ----------------
+const statsEl = el('div', { left: 0, top: 0, width: '393px', height: '170px', zIndex: 5, pointerEvents: 'none' });
+statsEl.dataset.id = 'stats';
+const LH_NUM = 36;
+const statSlots = L.stats.xs.map((cx, i) => {
+  const box = el('div', { left: (cx - 60) + 'px', width: '120px', ...centerY(L.stats.numY, LH_NUM), overflow: 'hidden' }, statsEl);
+  txt(statsEl, STAT_LABELS[i], { left: (cx - 50) + 'px', width: '100px', textAlign: 'center', ...centerY(L.stats.labelY, 16), font: `300 ${L.stats.labelSize}px ${FONT.sans}`, color: C.label });
+  box.dataset.id = 'stat' + i;
+  return { box, cx, slots: [] };
+});
+function buildStatDigits(i, n) {
+  const st = statSlots[i]; st.box.innerHTML = ''; st.slots = [];
+  const cw = L.stats.numSize * 0.6, x0 = 60 - (n * cw) / 2;
+  for (let j = 0; j < n; j++) {
+    const mk = () => txt(st.box, '', { left: (x0 + j * cw) + 'px', width: cw + 'px', top: 0, height: LH_NUM + 'px', lineHeight: LH_NUM + 'px', textAlign: 'center',
+                                       font: `250 ${L.stats.numSize}px "${FONT.mono}"`, color: C.num, fontVariantNumeric: 'tabular-nums' });
+    st.slots.push({ a: mk(), b: mk() });
+  }
+}
+const rollDir = [1, 1, 1];
+
+// ---------------- build: deck page ----------------
+const deck = el('div', { left: 0, top: 0, width: '393px', height: '852px', zIndex: 4 });
+deck.dataset.id = 'deck';
+const hint = el('div', { left: 0, top: 0, width: '393px', height: '852px', pointerEvents: 'none' }, deck);
+hint.dataset.id = 'hint';
+txt(hint, 'Swipe left to let go, right to keep', { left: 0, width: '393px', textAlign: 'center', ...centerY(L.hint.y1, 18), font: `300 ${L.hint.size}px ${FONT.sans}`, color: C.hint });
+txt(hint, 'tap the eye to see the photograph', { left: 0, width: '393px', textAlign: 'center', ...centerY(L.hint.y2, 18), font: `300 ${L.hint.size}px ${FONT.sans}`, color: C.hint });
+
+const CI = L.cardIn, CW = L.card.w, CH = L.card.h;
+function buildCard() {
+  const root = el('div', { left: L.card.x + 'px', top: L.card.y + 'px', width: CW + 'px', height: CH + 'px', borderRadius: L.card.r + 'px', overflow: 'hidden',
+                           transformOrigin: '50% 50%', willChange: 'transform' }, deck);
+  el('div', { left: 0, top: 0, width: '100%', height: '100%', borderRadius: L.card.r + 'px', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.09)', zIndex: 5, pointerEvents: 'none' }, root);
+  const base = el('div', { left: 0, top: 0, width: '100%', height: '100%' }, root);
+  const blur = el('div', { left: 0, top: 0, width: CW + 'px', height: CI.imgH + 'px', backgroundRepeat: 'no-repeat', filter: 'blur(13px) saturate(1.15)', transform: 'scale(1.08)', transformOrigin: '50% 30%',
+                           WebkitMaskImage: `linear-gradient(180deg, #000 ${CI.fadeA + 20}px, transparent ${CI.fadeB + 20}px)`, maskImage: `linear-gradient(180deg, #000 ${CI.fadeA + 20}px, transparent ${CI.fadeB + 20}px)` }, root);
+  const cv = el('canvas', { left: 0, top: 0, width: CW + 'px', height: (29 * ASCII_CELL.h) + 'px' }, root);
+  cv.width = CW * 2; cv.height = 29 * ASCII_CELL.h * 2;
+  const clear = el('div', { left: 0, top: 0, width: CW + 'px', height: CI.imgH + 'px', backgroundRepeat: 'no-repeat', opacity: 0, pointerEvents: 'none',
+                            WebkitMaskImage: `linear-gradient(180deg, #000 ${CI.fadeA + 40}px, transparent ${CI.fadeB + 30}px)`, maskImage: `linear-gradient(180deg, #000 ${CI.fadeA + 40}px, transparent ${CI.fadeB + 30}px)` }, root);
+  const content = el('div', { left: 0, top: 0, width: '100%', height: '100%' }, root);
+  const chip = el('div', { left: CI.chip.x + 'px', top: CI.chip.y + 'px', height: CI.chip.h + 'px', borderRadius: '99px', background: C.glassDark, backdropFilter: 'blur(10px)',
+                           padding: `0 ${CI.chip.padX}px`, font: `400 ${CI.chip.size}px ${FONT.sans}`, color: '#f4f4f4', lineHeight: CI.chip.h + 'px', whiteSpace: 'nowrap' }, root);
+  const eye = el('div', { left: (CI.eye.cx - CI.eye.d / 2) + 'px', top: (CI.eye.cy - CI.eye.d / 2) + 'px', width: CI.eye.d + 'px', height: CI.eye.d + 'px', borderRadius: '50%',
+                          background: C.glassDark, backdropFilter: 'blur(10px)', cursor: 'pointer' }, root, { 'data-act': 'eye' });
+  icon(eye, ICON.eye, 17, '#eef3f7', { left: '8px', top: '8px' }, false, 1.9);
+  const textBox = el('div', { left: 0, top: 0, width: '100%', height: '100%' }, content);
+  const heads = [0, 1, 2, 3].map((i) => txt(textBox, '', { left: CI.head.x + 'px', ...centerY(CI.head.firstY + i * CI.head.lh, CI.head.lh), font: `430 ${CI.head.size}px ${FONT.sans}`, color: '#fff', letterSpacing: '-0.1px' }));
+  el('div', { left: CI.quote.barX + 'px', top: CI.quote.y + 'px', width: '1.5px', height: CI.quote.h + 'px', background: 'rgba(255,255,255,.32)', borderRadius: '1px' }, textBox);
+  const quotes = [0, 1].map((i) => txt(textBox, '', { left: CI.quote.x + 'px', ...centerY(CI.quote.firstY + i * CI.quote.lh, CI.quote.lh), font: `300 ${CI.quote.size}px ${FONT.sans}`, color: 'rgba(255,255,255,.8)' }));
+  const btns = CI.btns.xs.map(([x, w], i) => {
+    const b = el('div', { left: x + 'px', top: CI.btns.y + 'px', width: w + 'px', height: CI.btns.h + 'px', borderRadius: '99px', background: C.btn, cursor: 'pointer' }, content, { 'data-act': ['bx', 'bw', 'bc'][i] });
+    icon(b, [ICON.x, ICON.wave, ICON.check][i], 23, '#fff', { left: (w / 2 - 11.5) + 'px', top: '16.5px' }, false, 2);
+    return b;
+  });
+  const dimmer = el('div', { left: 0, top: 0, width: '100%', height: '100%', background: C.stack1, opacity: 0, pointerEvents: 'none' }, root);
+  return { root, base, blur, cv, ctx: cv.getContext('2d'), clear, content, textBox, chip, eye, heads, quotes, btns, dimmer, card: -1 };
+}
+const cardEls = [buildCard(), buildCard(), buildCard(), buildCard()];
+function fillCard(ce, idx) {
+  const c = CARDS[((idx % CARDS.length) + CARDS.length) % CARDS.length];
+  if (ce.card === idx) return; ce.card = idx; ce.data = c;
+  ce.base.style.background = `${grad(c.tone.map(([o, col]) => [o, col]))}, ${c.tone[0][1]}`;
+  ce.base.style.background = grad([[0, c.tone[0][1]], ...c.tone]);
+  const cp = cropPlace(c.crop, CW);
+  for (const e of [ce.blur, ce.clear]) Object.assign(e.style, { backgroundImage: `url(${IMG(c.img)})`, backgroundSize: `${cp.size}px ${cp.size}px`, backgroundPosition: `${cp.x}px ${cp.y}px` });
+  ce.chip.textContent = c.tag;
+  ce.heads[0].textContent = c.date + ':'; c.lines.forEach((s, i) => (ce.heads[i + 1].textContent = s));
+  c.quote.forEach((s, i) => (ce.quotes[i].textContent = s));
+  ce.tick = -1;
+}
+function drawAscii(ce, k) {
+  if (ce.tick === k) return; ce.tick = k;
+  const g = ASCII_GRIDS[ce.data.img], ctx = ce.ctx; const W = ASCII_CELL.w, H = ASCII_CELL.h;
+  ctx.setTransform(2, 0, 0, 2, 0, 0); ctx.clearRect(0, 0, CW, 29 * H);
+  ctx.font = `500 ${ASCII_CELL.size}px "${FONT.mono}"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (let r = 0; r < g.rows; r++) {
+    const y = (r + 0.5) * H, fade = y < 150 ? 1 : clamp(1 - (y - 150) / 70, 0, 1); if (fade <= 0) continue;
+    for (let c = 0; c < g.cols; c++) {
+      const i = r * g.cols + c; let lv = parseInt(g.lv[i], 16); if (!lv) continue;
+      lv = clamp(lv + flickerAt(k, i), 1, 10);
+      const col = g.col.substr(i * 6, 6);
+      ctx.globalAlpha = Math.min(1, 0.42 + 0.06 * lv) * fade;
+      ctx.fillStyle = '#' + col;
+      ctx.fillText(ASCII_RAMP[lv], (c + 0.5) * W, y);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// toast
+const toast = el('div', { left: L.toast.x + 'px', top: L.toast.y + 'px', width: L.toast.w + 'px', height: L.toast.h + 'px', borderRadius: '99px', background: C.toast,
+                          border: `1px solid ${C.hair}`, boxShadow: '0 10px 30px rgba(0,0,0,.35)', opacity: 0 }, deck);
+const tChk = el('div', { left: (L.toast.check.cx - L.toast.x - L.toast.check.d / 2 - 1) + 'px', top: (L.toast.h / 2 - L.toast.check.d / 2 - 1) + 'px', width: L.toast.check.d + 'px', height: L.toast.check.d + 'px', borderRadius: '50%', background: C.accent }, toast);
+const tChkIco = icon(tChk, ICON.check, 15, C.accentInk, { left: '6.3px', top: '6.3px' }, false, 2.4);
+const tText = txt(toast, 'Kept · Nov 14', { left: (L.toast.textX - L.toast.x - 1) + 'px', top: 0, height: '100%', lineHeight: (L.toast.h - 2) + 'px', font: `400 ${L.toast.size}px ${FONT.sans}`, color: '#f0f0f0' });
+const undo = el('div', { left: (L.toast.undo.x - L.toast.x - 1) + 'px', top: (L.toast.undo.y - L.toast.y - 1) + 'px', width: L.toast.undo.w + 'px', height: L.toast.undo.h + 'px', borderRadius: '99px', background: C.undo,
+                         font: `500 ${L.toast.size}px ${FONT.sans}`, color: C.accent, textAlign: 'center', lineHeight: L.toast.undo.h + 'px', cursor: 'pointer' }, toast, { 'data-act': 'undo' });
+undo.textContent = 'Undo';
+toast.dataset.id = 'toast'; undo.dataset.id = 'undo';
+
+// ---------------- build: days list ----------------
+const daysPg = el('div', { left: 0, top: 0, width: '393px', height: '852px', zIndex: 3, opacity: 0, pointerEvents: 'none' });
+daysPg.dataset.id = 'days';
+const DL = L.days;
+const hazeCss = (haze) => `linear-gradient(180deg, transparent 50%, ${haze}66 74%, ${haze}c0 100%)`;   // light haze on thumb + hero (visible in flight)
+const scrimCss = (tint) => `linear-gradient(180deg, transparent 48%, ${tint}d0 78%, ${tint} 100%)`;  // dark text scrim, fades in with the hero text
+txt(daysPg, 'This week', { left: DL.labelX + 'px', ...centerY(DL.labelY, 18), font: `300 13px ${FONT.sans}`, color: '#5a5a5a' });
+const rows = DAYS.map((d, i) => {
+  const r = el('div', { left: DL.x + 'px', top: (DL.y + i * DL.pitch) + 'px', width: DL.w + 'px', height: DL.h + 'px', borderRadius: DL.r + 'px', background: C.row,
+                        boxShadow: 'inset 0 1px 0 rgba(255,255,255,.04)', cursor: 'pointer' }, daysPg, { 'data-act': 'row' + i });
+  const th = el('div', { left: DL.thumb.x + 'px', top: ((DL.h - DL.thumb.s) / 2) + 'px', width: DL.thumb.s + 'px', height: DL.thumb.s + 'px', borderRadius: DL.thumb.r + 'px', overflow: 'hidden' }, r);
+  el('img', { left: 0, top: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 30%' }, th, { src: IMG(d.img) });
+  el('div', { left: 0, top: 0, width: '100%', height: '100%', background: hazeCss(d.haze) }, th);
+  txt(r, d.title, { left: DL.titleX + 'px', ...centerY(DL.titleY, 22), font: `380 17px ${FONT.sans}`, color: C.text });
+  txt(r, d.sub, { left: DL.titleX + 'px', ...centerY(DL.subY, 18), font: `300 14px ${FONT.sans}`, color: C.rowSub });
+  txt(r, d.n, { right: DL.numR + 'px', ...centerY(DL.numY, 28), font: `300 22px "${FONT.mono}"`, color: C.rowNum });
+  r.dataset.id = 'row' + i;
+  return { r, th };
+});
+
+// ---------------- build: detail ----------------
+const detailPg = el('div', { left: 0, top: 0, width: '393px', height: '852px', zIndex: 6, pointerEvents: 'none', opacity: 0 });
+detailPg.dataset.id = 'detail';
+const DD = L.detail;
+const detRows = [0, 1, 2, 3].map((i) => {
+  const r = el('div', { left: DD.hero.x + 'px', top: (DD.rows.y + i * DD.rows.pitch) + 'px', width: DD.hero.w + 'px', height: DD.rows.h + 'px', borderRadius: DD.rows.r + 'px', background: C.rowDetail,
+                        boxShadow: 'inset 0 1px 0 rgba(255,255,255,.04)' }, detailPg);
+  const lab = txt(r, '', { left: DD.rows.labelX + 'px', ...centerY(DD.rows.h / 2, 18), font: `300 13px ${FONT.sans}`, color: C.rowLabel });
+  const tx = txt(r, '', { left: DD.rows.textX + 'px', ...centerY(DD.rows.h / 2, 20), font: `320 16px ${FONT.sans}`, color: '#eeeeee' });
+  const circ = el('div', { left: (DD.hero.w - DD.rows.circR - DD.rows.d / 2) + 'px', top: ((DD.rows.h - DD.rows.d) / 2) + 'px', width: DD.rows.d + 'px', height: DD.rows.d + 'px', borderRadius: '50%' }, r);
+  r.dataset.id = 'detrow' + i;
+  return { r, lab, tx, circ };
+});
+const detFoot = txt(detailPg, '', { left: 0, width: '393px', textAlign: 'center', ...centerY(DD.footY, 18), font: `300 13px ${FONT.sans}`, color: C.foot });
+
+// hero (shared element) — lives above both pages
+const hero = el('div', { left: 0, top: 0, overflow: 'hidden', zIndex: 7, opacity: 0, pointerEvents: 'none' });
+const heroImg = el('img', { left: 0, top: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: '50% 30%' }, hero);
+const heroHaze = el('div', { left: 0, top: 0, width: '100%', height: '100%' }, hero);
+const heroShade = el('div', { left: 0, top: 0, width: '100%', height: '100%', opacity: 0 }, hero);
+const heroUi = el('div', { left: 0, top: 0, width: DD.hero.w + 'px', height: DD.hero.h + 'px', opacity: 0 }, hero);
+hero.dataset.id = 'hero'; heroUi.dataset.id = 'heroUi';
+const backBtn = el('div', { left: (DD.back.cx - DD.back.d / 2) + 'px', top: (DD.back.cy - DD.back.d / 2) + 'px', width: DD.back.d + 'px', height: DD.back.d + 'px', borderRadius: '50%', background: C.glassDark, backdropFilter: 'blur(10px)', cursor: 'pointer' }, heroUi, { 'data-act': 'back' });
+icon(backBtn, ICON.chevL, 16, '#eef3f7', { left: '8px', top: '8.5px' }, false, 2);
+const cardsPill = el('div', { left: (DD.hero.w - DD.cards.r - DD.cards.w) + 'px', top: DD.cards.y + 'px', width: DD.cards.w + 'px', height: DD.cards.h + 'px', borderRadius: '99px', background: C.glassDark, backdropFilter: 'blur(10px)',
+                              font: `400 13px "${FONT.mono}"`, color: '#e8edf2', textAlign: 'center', lineHeight: DD.cards.h + 'px' }, heroUi);
+cardsPill.textContent = '04 cards';
+backBtn.dataset.id = 'back';
+const heroKick = txt(heroUi, '', { left: DD.textX + 'px', ...centerY(DD.kickerY, 18), font: `400 13px ${FONT.sans}`, letterSpacing: '1.3px', color: 'rgba(255,255,255,.82)' });
+const heroHead = DD.titleY.map((y) => txt(heroUi, '', { left: DD.textX + 'px', ...centerY(y, 28.4), font: `430 ${DD.titleSize}px ${FONT.sans}`, color: '#fff' }));
+
+// ---------------- build: tab bar + mic ----------------
+const TB = L.tabbar;
+const tabbar = el('div', { left: TB.x + 'px', top: TB.y + 'px', width: TB.w + 'px', height: TB.h + 'px', borderRadius: '99px', background: C.tabbar, border: `1px solid ${C.hair}`, zIndex: 20 });
+const pill = el('div', { left: 0, top: (TB.pill.y - TB.y - 1) + 'px', width: TB.pill.w + 'px', height: TB.pill.h + 'px', borderRadius: '99px',
+                         background: `radial-gradient(120% 90% at 50% 100%, ${C.tabActiveGlow} 0%, ${C.tabActive} 70%)` }, tabbar);
+tabbar.dataset.id = 'tabbar'; pill.dataset.id = 'pill';
+const tabs = ['Days', 'Deck', 'You'].map((name, i) => {
+  const t = el('div', { left: (TB.items[i] - TB.x - 1 - 36) + 'px', top: 0, width: '72px', height: '100%', cursor: 'pointer' }, tabbar, { 'data-act': 'tab' + i });
+  const ic = el('div', { left: '24px', top: (TB.iconY - TB.y - 1 - 12) + 'px', width: '24px', height: '24px' }, t);
+  const lab = txt(t, name, { left: 0, width: '72px', textAlign: 'center', ...centerY(TB.labelY - TB.y - 1, 14), font: `500 11px ${FONT.sans}`, color: '#e6e6e6' });
+  t.dataset.id = 'tab' + i;
+  return { t, ic, lab, name };
+});
+function paintTabs(active) {
+  tabs.forEach((tb, i) => {
+    tb.ic.innerHTML = '';
+    const on = i === active;
+    const d = i === 0 ? (on ? ICON.daysFill : ICON.days) : i === 1 ? (on ? ICON.deckFill : ICON.deck) : ICON.you;
+    icon(tb.ic, d, 24, on ? C.accent : '#ececec', {}, on && i < 2, 1.7);
+    tb.lab.style.color = on ? C.accent : '#e6e6e6';
+  });
+}
+const mic = el('div', { left: (L.mic.cx - L.mic.d / 2) + 'px', top: (L.mic.cy - L.mic.d / 2) + 'px', width: L.mic.d + 'px', height: L.mic.d + 'px', borderRadius: '50%', background: C.mic,
+                        border: `1px solid ${C.hair}`, zIndex: 20, cursor: 'pointer' }, scr, { 'data-act': 'mic' });
+icon(mic, ICON.mic, 22, '#f0f0f0', { left: (L.mic.d / 2 - 12) + 'px', top: (L.mic.d / 2 - 12) + 'px' }, false, 1.9);
+mic.dataset.id = 'mic';
+
+const homeBar = el('div', { left: (196.5 - L.home.w / 2) + 'px', top: (L.home.y - L.home.h / 2) + 'px', width: L.home.w + 'px', height: L.home.h + 'px', borderRadius: '3px', background: C.home, zIndex: 95, pointerEvents: 'none' });
+
+// ---------------- build: dim + sheet ----------------
+const dim = el('div', { left: 0, top: 0, width: '393px', height: '852px', background: '#000', opacity: 0, zIndex: 40, pointerEvents: 'none' });
+dim.dataset.id = 'dim';
+const sheet = el('div', { left: 0, top: L.sheet.top + 'px', width: '393px', height: (SCREEN.h - L.sheet.top + 60) + 'px', borderRadius: `${L.sheet.r}px ${L.sheet.r}px 0 0`, overflow: 'hidden', zIndex: 50,
+                          transformOrigin: '50% 0%', willChange: 'transform' }, scr, { 'data-act': 'sheet' });
+const SH = L.sheet;
+sheet.dataset.id = 'sheet';
+const shPhoto = el('img', { left: SH.photo.x + 'px', top: (SH.photo.y - SH.top) + 'px', width: SH.photo.w + 'px', height: SH.photo.h + 'px', objectFit: 'cover', objectPosition: '50% 25%', borderRadius: SH.photo.r + 'px',
+                            WebkitMaskImage: 'linear-gradient(180deg,#000 55%,transparent 90%)', maskImage: 'linear-gradient(180deg,#000 55%,transparent 90%)' }, sheet);
+el('div', { left: (196.5 - SH.grab.w / 2) + 'px', top: (SH.grab.y - SH.top - SH.grab.h / 2) + 'px', width: SH.grab.w + 'px', height: SH.grab.h + 'px', borderRadius: '3px', background: 'rgba(200,214,234,.62)' }, sheet);
+const shClose = el('div', { left: (SH.close.cx - SH.close.d / 2) + 'px', top: (SH.close.cy - SH.top - SH.close.d / 2) + 'px', width: SH.close.d + 'px', height: SH.close.d + 'px', borderRadius: '50%', background: 'rgba(12,22,44,.6)', backdropFilter: 'blur(8px)', cursor: 'pointer' }, sheet, { 'data-act': 'close' });
+icon(shClose, ICON.x, 14, '#eef3f7', { left: '9px', top: '9px' }, false, 2.1);
+const shBody = el('div', { left: 0, top: (-SH.top) + 'px', width: '393px', height: '852px' }, sheet);
+const shChip = el('div', { left: SH.x + 'px', top: SH.chip.y + 'px', height: SH.chip.h + 'px', padding: '0 11px', borderRadius: '99px', background: 'rgba(255,255,255,.14)', font: `500 12px ${FONT.sans}`, color: '#fff', lineHeight: SH.chip.h + 'px' }, shBody);
+const shMeta = txt(shBody, '', { left: SH.metaX + 'px', ...centerY(SH.metaY, 16), font: `300 12.5px "${FONT.mono}"`, color: 'rgba(255,255,255,.55)' });
+const shLines = [0, 1, 2].map((i) => txt(shBody, '', { left: SH.x + 'px', ...centerY(SH.title.firstY + i * SH.title.lh, SH.title.lh), font: `430 ${SH.title.size}px ${FONT.sans}`, color: '#fff', letterSpacing: '-0.15px' }));
+el('div', { left: SH.x + 'px', top: SH.quote.y + 'px', width: '2px', height: SH.quote.h + 'px', borderRadius: '1px', background: C.accent }, shBody);
+const shQuote = [0, 1].map((i) => txt(shBody, '', { left: SH.quote.x + 'px', ...centerY(SH.quote.firstY + i * SH.quote.lh, SH.quote.lh), font: `300 ${SH.quote.size}px ${FONT.sans}`, color: 'rgba(255,255,255,.8)' }));
+const audio = el('div', { left: SH.x + 'px', top: SH.audio.y + 'px', width: SH.audio.w + 'px', height: SH.audio.h + 'px', borderRadius: '99px', background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.12)' }, shBody);
+{
+  const A = SH.audio, cy = A.h / 2 - 1;
+  const pb = el('div', { left: (A.play.cx - SH.x - A.play.d / 2 - 1) + 'px', top: (cy - A.play.d / 2) + 'px', width: A.play.d + 'px', height: A.play.d + 'px', borderRadius: '50%', background: '#fcfcfc' }, audio);
+  icon(pb, ICON.play, 14, '#141414', { left: '11.5px', top: '11px' }, true);
+  const n = WAVE.length, dx = (A.barsX1 - A.barsX0) / (n - 1);
+  WAVE.forEach((h, i) => el('div', { left: (A.barsX0 - SH.x - 1 + i * dx - 1) + 'px', top: (cy - h / 2) + 'px', width: '1.8px', height: h + 'px', borderRadius: '1px', background: i < WAVE_PLAYED ? C.accent : 'rgba(255,255,255,.55)' }, audio));
+}
+const shDur = txt(audio, '', { left: (SH.audio.timeX - SH.x - 1) + 'px', top: 0, height: (SH.audio.h - 2) + 'px', lineHeight: (SH.audio.h - 2) + 'px', font: `300 13px "${FONT.mono}"`, color: 'rgba(255,255,255,.62)' });
+const shTags = [0, 1, 2].map(() => el('div', { top: SH.tags.y + 'px', height: SH.tags.h + 'px', padding: '0 10px', borderRadius: '99px', border: '1px solid rgba(255,255,255,.22)', font: `300 13px ${FONT.sans}`, color: 'rgba(255,255,255,.72)', lineHeight: (SH.tags.h - 2) + 'px' }, shBody));
+function fillSheet(c) {
+  sheet.style.background = grad(c.sheet);
+  shPhoto.src = IMG(c.img); shChip.textContent = c.tag; shMeta.textContent = `${c.date} · ${c.time}`;
+  c.lines.forEach((s, i) => (shLines[i].textContent = s)); c.quoteFull.forEach((s, i) => (shQuote[i].textContent = s));
+  shDur.textContent = c.dur;
+  let x = SH.x; c.tags.forEach((t, i) => { shTags[i].textContent = t; shTags[i].style.left = x + 'px'; x += shTags[i].offsetWidth + SH.tags.gap; });
+}
+
+// touch indicator (demo only — mirrors the screen-recording touch dot, not part of the UI)
+const finger = el('div', { left: 0, top: 0, width: '34px', height: '34px', borderRadius: '50%', background: 'radial-gradient(circle at 40% 35%, rgba(235,235,240,.85), rgba(170,170,180,.75))',
+                           border: '1px solid rgba(255,255,255,.7)', zIndex: 90, opacity: 0, pointerEvents: 'none', boxShadow: '0 2px 8px rgba(0,0,0,.3)' });
+
+// ---------------- render ----------------
+const PRESS = {};   // press scales by id
+const pressEls = () => ({ undo, mic, eye: cardEls[0]?.eye, back: backBtn, close: shClose, tab0: tabs[0].t, tab1: tabs[1].t, tab2: tabs[2].t,
+  bx: slotEl(0)?.btns[0], bw: slotEl(0)?.btns[1], bc: slotEl(0)?.btns[2], ...Object.fromEntries(rows.map((r, i) => ['row' + i, r.r])) });
+let slots = [0, 1, 2, 3];     // slots[d] = index into cardEls for depth d
+const slotEl = (d) => cardEls[slots[d]];
+function render() {
+  // deck stack
+  if (S.fly) { const f = S.fly; V.dx = FEEL ? flyPos(f.x0, f.dist, f.v0, V.fly * f.dur, f.dur) : f.x0 + f.dist; V.rot = V.dx * DRAG.rotPerPt; }
+  const p = V.promo;
+  for (let d = 0; d < 4; d++) {
+    const ce = slotEl(d); fillCard(ce, S.top + d);
+    let tx = 0, ty, s, rot = 0, dimA, dimCol = C.stack1, op = 1;
+    if (d === 0) { tx = V.dx; ty = V.dy; s = 1; rot = V.rot; dimA = 0; op = V.topA; }
+    else if (d === 1) { s = lerp(L.stack[1].s, 1, p); ty = lerp(L.stack[1].ty, 0, p); dimA = lerp(1, 0.45, p) * (1 - V.lift); }
+    else if (d === 2) { s = lerp(L.stack[2].s, L.stack[1].s, p); ty = lerp(L.stack[2].ty, L.stack[1].ty, p); dimA = 1; dimCol = p > 0.5 ? C.stack1 : C.stack2; }
+    else { s = lerp(0.73, L.stack[2].s, p); ty = lerp(100, L.stack[2].ty, p); dimA = 1; dimCol = C.stack2; op = p; }
+    ce.root.style.transform = `translate(${tx}px, ${ty}px) rotate(${rot}deg) scale(${s})`;
+    ce.root.style.zIndex = 10 - d; ce.root.style.opacity = op; ce.root.dataset.id = 'card' + d; ce.textBox.dataset.id = 'cardText' + d;
+    ce.dimmer.style.opacity = dimA; ce.dimmer.style.background = dimCol;
+    ce.root.style.boxShadow = d === 0 ? '0 10px 24px rgba(0,0,0,.28)' : '0 6px 14px rgba(0,0,0,.18)';
+    ce.root.style.pointerEvents = d === 0 && S.tab === 'deck' ? 'auto' : 'none';
+    if (d === 0) ce.root.setAttribute('data-act', 'card'); else ce.root.removeAttribute('data-act');
+    if (d <= 1) drawAscii(ce, Math.floor((clock * 1000) / FLICKER_MS));
+    ce.clear.style.opacity = d === 0 ? V.clear : 0;
+    ce.textBox.style.opacity = d === 0 ? V.cardText : 1;
+  }
+  // press scales on card buttons / others
+  const pe = pressEls();
+  for (const k in pe) if (pe[k]) {
+    const v = V['p_' + k] ?? 1; const base = pe[k] === slotEl(0)?.eye ? '' : '';
+    pe[k].style.transform = v !== 1 ? `scale(${v})` : '';
+  }
+  // stats
+  const cur = fmtStats(S.stats), prev = fmtStats(S.prevStats);
+  cur.forEach((s, i) => {
+    const st = statSlots[i]; const n = Math.max(s.length, prev[i].length);
+    if (st.slots.length !== n) buildStatDigits(i, n);
+    const roll = digitRoll(prev[i], s, V['roll' + i], rollDir[i] > 0);
+    roll.forEach((r, j) => {
+      const sl = st.slots[j];
+      sl.a.textContent = r.ch.trim(); sl.a.style.transform = `translateY(${r.off * LH_NUM}px)`;
+      if (r.old !== null && Math.abs(r.off) > 1e-3) { sl.b.textContent = r.old.trim(); sl.b.style.transform = `translateY(${(r.off - (rollDir[i] > 0 ? 1 : -1)) * LH_NUM}px)`; sl.b.style.opacity = 1; }
+      else sl.b.style.opacity = 0;
+    });
+  });
+  statsEl.style.opacity = V.statsA;
+  // toast / hint
+  const tv = V.toast;
+  toast.style.opacity = clamp(tv * 1.6, 0, 1); toast.style.transform = `translateY(${(1 - tv) * 46}px)`;
+  toast.style.pointerEvents = tv > 0.5 ? 'auto' : 'none';
+  hint.style.opacity = clamp(1 - tv * 2.2, 0, 1);
+  // pages
+  deck.style.opacity = V.deckA; deck.style.pointerEvents = S.tab === 'deck' ? 'auto' : 'none'; deck.style.visibility = V.deckA < 0.005 ? 'hidden' : 'visible';
+  daysPg.style.opacity = V.daysA * V.listA; daysPg.style.visibility = V.daysA * V.listA < 0.005 ? 'hidden' : 'visible'; daysPg.style.pointerEvents = S.tab === 'days' && S.day < 0 ? 'auto' : 'none';
+  // hero
+  if (V.heroOn > 0 && S.heroIdx >= 0) {
+    const r = heroRect(S.heroIdx, V.heroP);
+    Object.assign(hero.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px', borderRadius: r.r + 'px', opacity: 1, pointerEvents: S.day >= 0 ? 'auto' : 'none' });
+    heroUi.style.opacity = V.heroText; heroShade.style.opacity = V.heroText;
+    rows.forEach((rw, i) => (rw.th.style.opacity = i === S.heroIdx ? 0 : 1));
+  } else { hero.style.opacity = 0; hero.style.pointerEvents = 'none'; rows.forEach((rw) => (rw.th.style.opacity = 1)); }
+  detailPg.style.opacity = V.detailA; detailPg.style.pointerEvents = S.day >= 0 ? 'auto' : 'none';
+  detRows.forEach((r, i) => { const a = clamp(V.detailA * 4 - i * 0.5 * (FEEL ? 1 : 0), 0, 1); r.r.style.opacity = a; r.r.style.transform = `translateY(${(1 - a) * 8}px)`; });
+  // tab pill
+  pill.style.transform = `translateX(${V.pillX - TB.x - 1 - TB.pill.w / 2}px)`;
+  // sheet
+  if (S.sheetFly) { const f = S.sheetFly; V.sheetY = FEEL ? flyPos(f.y0, f.dist, f.v0, V.sheetFlyT * f.dur, f.dur) : f.y0 + f.dist; }
+  sheet.style.transform = `translateY(${V.sheetY}px) scale(${V.sheetS})`;
+  sheet.style.borderRadius = `${L.sheet.r + (1 - V.sheetS) * 200}px ${L.sheet.r + (1 - V.sheetS) * 200}px ${(1 - V.sheetS) * 300}px ${(1 - V.sheetS) * 300}px`;
+  sheet.style.visibility = V.sheetY >= SCREEN.h - L.sheet.top - 1 ? 'hidden' : 'visible';
+  dim.style.opacity = V.dim * 0.62;
+  status.style.background = V.dim > 0.01 ? `rgba(16,16,16,${V.dim})` : 'transparent';
+}
+
+// ---------------- actions ----------------
+function pressIn(id) { spring('p_' + id, id.startsWith('row') ? T.rowPressScale : T.pressScale, SPR.press); }
+function pressOut(id) { spring('p_' + id, 1, SPR.press); }
+
+function decide(keep, vx) {
+  if (S.busy) return; S.busy = true;
+  const before = { ...S.stats };
+  const dir = keep ? 1 : -1;
+  const x0 = V.dx, dist = dir * DRAG.flyX - x0;
+  const v0 = vx || (FEEL ? dir * 900 : 0);         // button taps throw with a modest start speed
+  const dur = flyDuration(dist, v0);
+  S.fly = { x0, dist, v0, dur };
+  let pending = 2; const both = () => { if (--pending === 0) shift(); };
+  set('fly', 0); tween('fly', 1, dur, EASE.lin, 0, both);
+  tween('lift', 1, T.liftDur, EASE.fade);
+  spring('promo', 1, SPR.follow, 0, both);
+  function shift() {
+    // shift the stack: the thrown card leaves, everyone moves up one depth
+    S.hist.push({ top: S.top, before, keep });
+    slots = [slots[1], slots[2], slots[3], slots[0]];
+    S.top += 1; S.fly = null; set('promo', 0); set('lift', 0); set('dx', 0); set('rot', 0); set('dy', 0);
+    S.busy = false;
+  }
+  // stats + toast
+  after(T.digitDelay, () => {
+    S.prevStats = { ...S.stats }; S.stats = applyDecision(S.stats, keep);
+    const a = fmtStats(S.prevStats), b = fmtStats(S.stats);
+    [0, 1, 2].forEach((i) => { rollDir[i] = +b[i] >= +a[i] ? 1 : -1; if (a[i] !== b[i]) { set('roll' + i, 0); spring('roll' + i, 1, SPR.digit); } });
+  });
+  const c = CARDS[S.top % CARDS.length];
+  after(T.toastDelay, () => {
+    tText.textContent = `${keep ? 'Kept' : 'Let go'} · ${c.toast}`;
+    tChk.style.background = keep ? C.accent : '#5a5a5a';
+    tChkIco.querySelector('path').setAttribute('d', keep ? ICON.check : ICON.x);
+    set('toast', V.toast); spring('toast', 1, SPR.toast);
+  });
+}
+function undoLast() {
+  const h = S.hist.pop(); if (!h || S.busy) { if (h) S.hist.push(h); return; }
+  S.busy = true;
+  // bring the card back from the side it left
+  slots = [slots[3], slots[0], slots[1], slots[2]];
+  S.top = h.top; const dir = h.keep ? 1 : -1;
+  set('dx', dir * 440); set('rot', dir * 16); set('promo', 1);
+  spring('dx', 0, SPR.back); spring('rot', 0, SPR.back);
+  spring('promo', 0, SPR.back, 0, () => { S.busy = false; });
+  tween('lift', 0, 0.01);
+  S.prevStats = { ...S.stats }; S.stats = { ...h.before };
+  const a = fmtStats(S.prevStats), b = fmtStats(S.stats);
+  [0, 1, 2].forEach((i) => { rollDir[i] = +b[i] >= +a[i] ? 1 : -1; if (a[i] !== b[i]) { set('roll' + i, 0); spring('roll' + i, 1, SPR.digit); } });
+  tween('toast', 0, 0.1, EASE.fade);
+}
+function openSheet() {
+  if (S.sheet) return; S.sheet = true;
+  fillSheet(CARDS[S.top % CARDS.length]);
+  tween('clear', 1, T.imgSwap); tween('cardText', 0, T.cardTextFade);
+  set('sheetS', 1); set('sheetDrag', 0);
+  tween('sheetY', 0, T.sheetOpen, EASE.sheet);
+  tween('dim', 1, T.sheetDim, EASE.fade);
+}
+function closeSheet(vy) {
+  if (!S.sheet) return; S.sheet = false;
+  const target = SCREEN.h - L.sheet.top + 10, y0 = V.sheetY, dist = target - y0;
+  const v0 = vy || 600, dur = flyDuration(dist, v0);
+  S.sheetFly = { y0, dist, v0, dur };
+  set('sheetFlyT', 0); tween('sheetFlyT', 1, dur, EASE.lin, 0, () => { S.sheetFly = null; set('sheetY', target); set('sheetS', 1); });
+  tween('dim', 0, 0.25, EASE.fade);
+  tween('clear', 0, T.asciiBack, EASE.fade, T.asciiBackDelay);
+  tween('cardText', 1, 0.2, EASE.fade, T.textBackDelay);
+}
+function goTab(i) {
+  if (i === 2) return;                       // "You" has no page in the source
+  const name = i === 0 ? 'days' : 'deck';
+  if (S.day >= 0) closeDetail(true);
+  if (S.tab === name) return;
+  S.tab = name; paintTabs(i);
+  spring('pillX', TB.items[i], SPR.pill);
+  const [inK, outK] = name === 'days' ? ['daysA', 'deckA'] : ['deckA', 'daysA'];
+  tween(inK, 1, T.tabIn, EASE.fade, T.tabInDelay); tween(outK, 0, T.tabOut, EASE.fade, T.tabOutDelay);
+}
+function fillDetail(i) {
+  const d = DAYS[i];
+  heroImg.src = IMG(d.img);
+  heroHaze.style.background = hazeCss(d.haze); heroShade.style.background = scrimCss(d.heroTint);
+  heroKick.textContent = d.kicker; d.head.forEach((s, j) => (heroHead[j].textContent = s));
+  cardsPill.textContent = String(d.items.length).padStart(2, '0') + ' cards';
+  d.items.forEach(([lab, tx, ok], j) => {
+    const r = detRows[j]; r.lab.textContent = lab; r.tx.textContent = tx; r.tx.style.color = ok ? '#eeeeee' : '#7a7a7a';
+    r.circ.innerHTML = '';
+    if (ok) { r.circ.style.background = '#eca560'; r.circ.style.border = '0'; icon(r.circ, ICON.check, 15, C.accentInk, { left: '6.3px', top: '6.3px' }, false, 2.4); }
+    else { r.circ.style.background = 'transparent'; r.circ.style.border = '1px solid #4a4a4a'; icon(r.circ, ICON.x, 12, '#8a8a8a', { left: '6.8px', top: '6.8px' }, false, 1.8); }
+  });
+  detFoot.textContent = d.foot;
+}
+function openDetail(i) {
+  if (S.day >= 0) return; S.day = i; S.heroIdx = i; fillDetail(i);
+  set('heroOn', 1); set('heroP', 0); set('heroText', 0);
+  tween('listA', 0, T.listOut); tween('statsA', 0, T.listOut);
+  spring('heroP', 1, SPR.hero);
+  tween('heroText', 1, 0.16, EASE.fade, T.detailInDelay);
+  tween('detailA', 1, T.detailIn, EASE.fade, T.detailInDelay);
+}
+function closeDetail(instant) {
+  if (S.day < 0) return; const i = S.day; S.day = -1;
+  if (instant) { set('heroOn', 0); set('heroP', 0); set('detailA', 0); set('heroText', 0); set('listA', 1); set('statsA', 1); return; }
+  tween('heroText', 0, 0.1); tween('detailA', 0, 0.12);
+  after(T.backDelay, () => spring('heroP', 0, SPR.heroBack, 0, () => set('heroOn', 0)));
+  tween('listA', 1, 0.2, EASE.fade, T.backDelay); tween('statsA', 1, 0.2, EASE.fade, T.backDelay);
+}
+
+// ---------------- input ----------------
+let ptr = null;
+function hitAct(x, y) {
+  let e = document.elementFromPoint(...toClient(x, y));
+  while (e && e !== scr) { if (e.dataset && e.dataset.act) return { act: e.dataset.act, e }; e = e.parentElement; }
+  return { act: null };
+}
+function toClient(x, y) { const r = scr.getBoundingClientRect(); return [r.left + x * (r.width / 393), r.top + y * (r.height / 852)]; }
+function toLocal(cx, cy) { const r = scr.getBoundingClientRect(); return [(cx - r.left) * (393 / r.width), (cy - r.top) * (852 / r.height)]; }
+function onDown(x, y) {
+  const { act } = hitAct(x, y);
+  ptr = { act, x0: x, y0: y, x, y, hist: [[clock, x, y]], moved: false };
+  if (!act) return;
+  if (['card', 'sheet'].includes(act)) return;
+  pressIn(act);
+}
+function onMove(x, y) {
+  if (!ptr) return; ptr.x = x; ptr.y = y; ptr.hist.push([clock, x, y]); while (ptr.hist.length > 2 && clock - ptr.hist[0][0] > 0.1) ptr.hist.shift();
+  const dx = x - ptr.x0, dy = y - ptr.y0;
+  if (Math.hypot(dx, dy) > 6) ptr.moved = true;
+  if (ptr.act === 'card' && !S.busy && S.tab === 'deck' && !S.sheet) {
+    if (FEEL) { set('dx', dx); set('dy', dy * 0.15); set('rot', dx * DRAG.rotPerPt); set('promo', dragDerived(dx).nextDim === 1 ? 0 : clamp(Math.abs(dx) / DRAG.nextRamp, 0, 1)); }
+  } else if (ptr.act === 'sheet' && S.sheet) {
+    const d = sheetDragDerived(dy);
+    if (FEEL) { set('sheetY', d.ty); set('sheetS', d.scale); set('dim', d.dim); }
+  }
+}
+function vel(p) { const h = p.hist; if (h.length < 2) return [0, 0]; const a = h[0], b = h[h.length - 1]; const dt = Math.max(1e-3, b[0] - a[0]); return [(b[1] - a[1]) / dt, (b[2] - a[2]) / dt]; }
+function onUp(x, y) {
+  if (!ptr) return; const p = ptr; ptr = null;
+  const dx = x - p.x0, dy = y - p.y0; const [vx, vy] = vel(p);
+  if (p.act === 'card') {
+    if (S.busy || S.sheet) return;
+    const commit = FEEL ? (Math.abs(dx) > DRAG.commitDx || (Math.abs(vx) > DRAG.commitV && Math.sign(vx) === Math.sign(dx))) : Math.abs(dx) > 60;
+    if (commit) decide(dx > 0, FEEL ? vx : 0);
+    else { spring('dx', 0, SPR.back, vx); spring('dy', 0, SPR.back); spring('rot', 0, SPR.back); spring('promo', 0, SPR.back); }
+    return;
+  }
+  if (p.act === 'sheet') {
+    if (!S.sheet) return;
+    if (dy > SHEET_DRAG.commitDy || vy > SHEET_DRAG.commitV) closeSheet(vy);
+    else { spring('sheetY', 0, SPR.sheetBack, vy); spring('sheetS', 1, SPR.sheetBack); spring('dim', 1, SPR.sheetBack); }
+    return;
+  }
+  if (!p.act) return;
+  pressOut(p.act);
+  const still = hitAct(x, y).act === p.act;
+  if (!still) return;
+  const a = p.act;
+  if (a === 'eye') openSheet();
+  else if (a === 'close') closeSheet(0);
+  else if (a === 'undo') undoLast();
+  else if (a === 'bc') decide(true, 0);
+  else if (a === 'bx') decide(false, 0);
+  else if (a.startsWith('tab')) goTab(+a.slice(3));
+  else if (a.startsWith('row')) openDetail(+a.slice(3));
+  else if (a === 'back') closeDetail(false);
+}
+let live = true;
+scr.addEventListener('pointerdown', (e) => { if (demo) return; scr.setPointerCapture(e.pointerId); onDown(...toLocal(e.clientX, e.clientY)); });
+scr.addEventListener('pointermove', (e) => { if (demo || !ptr) return; onMove(...toLocal(e.clientX, e.clientY)); });
+scr.addEventListener('pointerup', (e) => { if (demo) return; onUp(...toLocal(e.clientX, e.clientY)); });
+scr.addEventListener('pointercancel', (e) => { if (demo) return; onUp(...toLocal(e.clientX, e.clientY)); });
+
+// ---------------- demo: the source's gesture sequence (times = With-FEEL clips, re-based) ----------------
+// [t, 'd'|'m'|'u', x, y]  (pt). Each clip mirrors one segment of the post.
+const DEMO = [
+  // DRAG — throw the card right (src 3.77→4.07 s, ~600 pt/s at release)
+  [0.9, 'd', 150, 420], [1.0, 'm', 168, 418], [1.1, 'm', 214, 416], [1.2, 'm', 284, 412], [1.3, 'm', 334, 409], [1.4, 'm', 340, 409], [1.56, 'm', 341, 409], [1.57, 'u', 341, 409],
+  // PRESS — Undo (src 7.55→8.17 s)
+  [3.0, 'd', 330, 708], [3.55, 'u', 330, 708],
+  // SHEET — tap the eye (src 11.9→12.4 s)
+  [4.9, 'd', 333, 227], [5.4, 'u', 333, 227],
+  // DRAG — pull the sheet down and throw it (src 16.0→16.78 s)
+  [7.0, 'd', 200, 300], [7.25, 'm', 200, 335], [7.5, 'm', 200, 400], [7.65, 'm', 200, 470], [7.73, 'm', 200, 515], [7.75, 'u', 200, 525],
+  // PAGE — tabs crossfade to Days (src 19.65→20.05 s)
+  [9.4, 'd', 67, 780], [9.75, 'u', 67, 780],
+  // PAGE — the picture grows into its page (src 23.15→23.7 s)
+  [11.3, 'd', 120, 258], [11.8, 'u', 120, 258],
+  // PAGE — and goes back (src 26.65→27.15 s)
+  [13.8, 'd', 57, 97], [14.25, 'u', 57, 97],
+  // PAGE — tabs crossfade back to Deck (src 30.3→30.63 s)
+  [15.8, 'd', 150, 780], [16.15, 'u', 150, 780],
+];
+const DEMO_LEN = 18;
+let demo = Q.has('demo'), demoT = 0, demoI = 0, demoDown = false;
+function resetAll() {
+  AN.clear(); TIMERS.length = 0; resetValues();
+  Object.assign(S, { top: 0, stats: { ...STATS0 }, prevStats: { ...STATS0 }, hist: [], tab: 'deck', day: -1, sheet: false, busy: false, heroIdx: -1, fly: null, sheetFly: null });
+  slots = [0, 1, 2, 3]; cardEls.forEach((c) => (c.card = -1)); paintTabs(1);
+}
+function demoStep(dt) {
+  demoT += dt;
+  while (demoI < DEMO.length && DEMO[demoI][0] <= demoT) {
+    const [, k, x, y] = DEMO[demoI++];
+    if (k === 'd') { onDown(x, y); demoDown = true; } else if (k === 'm') onMove(x, y); else { onUp(x, y); demoDown = false; }
+    finger.style.left = (x - 17) + 'px'; finger.style.top = (y - 17) + 'px';
+  }
+  // interpolate moves between keyframes for a smooth finger
+  if (demoDown && demoI < DEMO.length && DEMO[demoI][1] !== 'd') {
+    const a = DEMO[demoI - 1], b = DEMO[demoI]; const u = clamp((demoT - a[0]) / (b[0] - a[0]), 0, 1);
+    const x = lerp(a[2], b[2], u), y = lerp(a[3], b[3], u);
+    if (b[1] === 'm' || b[1] === 'u') { if (a[2] !== b[2] || a[3] !== b[3]) onMove(x, y); finger.style.left = (x - 17) + 'px'; finger.style.top = (y - 17) + 'px'; }
+  }
+  finger.style.opacity = demoDown ? 1 : Math.max(0, (+finger.style.opacity || 0) - dt * 6);
+  if (demoT > DEMO_LEN) { demoT = 0; demoI = 0; resetAll(); }
+}
+
+// ---------------- frozen states (parity / thumbnails) ----------------
+function freeze(name) {
+  FEEL = true;
+  const { v, s } = frozenInit(name);
+  Object.assign(V, v); Object.assign(S, s);
+  slots = [0, 1, 2, 3].map((d) => ((d + s.top) % 4 + 4) % 4);   // same physical rotation decide() produces
+  if (S.sheet) fillSheet(CARDS[S.top % CARDS.length]);
+  if (S.heroIdx >= 0) fillDetail(S.heroIdx);
+  paintTabs(S.tab === 'days' ? 0 : 1);
+}
+
+// ---------------- controls ----------------
+document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
+  FEEL = b.dataset.mode === 'feel';
+  document.querySelectorAll('[data-mode]').forEach((x) => x.classList.toggle('on', x === b));
+  const u = new URL(location.href); FEEL ? u.searchParams.delete('mode') : u.searchParams.set('mode', 'flat'); history.replaceState(null, '', u);
+}));
+document.querySelector('[data-mode="flat"]').classList.toggle('on', !FEEL);
+document.querySelector('[data-mode="feel"]').classList.toggle('on', FEEL);
+document.querySelector('[data-demo]').addEventListener('click', (e) => { demo = !demo; e.target.classList.toggle('on', demo); demoT = 0; demoI = 0; resetAll(); if (!demo) finger.style.opacity = 0; });
+document.querySelector('[data-demo]').classList.toggle('on', demo);
+
+// ---------------- boot ----------------
+paintTabs(1);
+await document.fonts.ready;
+[0, 1, 2].forEach((i) => buildStatDigits(i, fmtStats(S.stats)[i].length));
+const frozen = Q.get('state');
+if (frozen) freeze(frozen);
+render();
+if (Q.has('t') && demo) { const tt = parseFloat(Q.get('t')); const h = 1 / 120; for (let t = 0; t < tt - 1e-9; t += h) { demoStep(h); step(h); render(); } }
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!frozen && !Q.has('t')) { if (demo) demoStep(dt); step(dt); }
+  render();
+  window.__V = { ...V, top: S.top, tab: S.tab, day: S.day, stats: fmtStats(S.stats) };
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+window.__ready = true;
+</script>
+</body>
+</html>

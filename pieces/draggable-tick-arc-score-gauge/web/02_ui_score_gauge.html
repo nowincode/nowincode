@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Score Gauge</title>
+<style>
+  @font-face { font-family: 'GagInter'; src: url('fonts/Inter_400Regular.ttf'); font-weight: 400; }
+  @font-face { font-family: 'GagInter'; src: url('fonts/Inter_500Medium.ttf'); font-weight: 500; }
+  @font-face { font-family: 'GagJakarta'; src: url('fonts/PlusJakartaSans_600SemiBold.ttf'); font-weight: 600; }
+
+  :root { --stage: #ededed; --chrome: #6f6e68; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--stage);
+    font-family: 'GagInter', -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 36px; min-height: 100vh; padding: 32px 16px;
+  }
+  .stage { display: flex; gap: 40px; flex-wrap: wrap; justify-content: center; }
+  .slot { position: relative; }
+
+  /* ── the component ───────────────────────────────────────── */
+  .gag {
+    width: 320px; height: 238px; padding: 16px; border-radius: 20px;
+    user-select: none; -webkit-user-select: none; position: relative;
+  }
+  .gag-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 28px; }
+  .gag-title { font-size: 16px; line-height: 22px; font-weight: 500; letter-spacing: -0.01em; white-space: nowrap; }
+  .gag-pills { position: relative; height: 28px; display: flex; justify-content: flex-end; }
+  .gag-band.leaving { position: absolute; right: 0; top: 0; }
+  .gag-band {
+    height: 28px; padding: 0 12px; border-radius: 999px;
+    font-size: 12px; line-height: 28px; font-weight: 500; white-space: nowrap;
+  }
+  .gag-plot { display: block; margin-top: 18px; overflow: visible; cursor: grab; touch-action: none; outline: none; }
+  .gag-plot[data-held] { cursor: grabbing; }
+  .gag-plot:focus-visible { outline: 2px solid #2231dd; outline-offset: 4px; border-radius: 10px; }
+  .gag-figure { font-family: 'GagJakarta', 'GagInter', sans-serif; font-size: 44px; font-weight: 600;
+    letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .gag-of { font-size: 13px; font-weight: 400; font-variant-numeric: tabular-nums; }
+
+  /* demo pointer (preview chrome, not part of the component) */
+  .touch { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%;
+    pointer-events: none; opacity: 0; transition: opacity 120ms, transform 120ms; }
+  .touch[data-on] { opacity: 1; }
+  .touch[data-down] { transform: scale(0.82); }
+  .slot.light .touch { background: rgba(23,24,26,.16); box-shadow: 0 0 0 1.5px rgba(255,255,255,.9); }
+  .slot.dark .touch { background: rgba(255,255,255,.22); box-shadow: 0 0 0 1.5px rgba(255,255,255,.35); }
+
+  /* preview controls */
+  .controls { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--chrome); }
+  .seg { display: inline-flex; background: #e2e2e0; border-radius: 999px; padding: 3px; }
+  .seg button, .btn { font: 500 13px 'GagInter', sans-serif; border: 0; background: transparent; color: var(--chrome);
+    height: 28px; padding: 0 12px; border-radius: 999px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: #fff; color: #17181a; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .btn { background: #e2e2e0; }
+  .btn:hover { color: #17181a; }
+  body.shot .controls { display: none; }
+</style>
+<!-- nic:screen-mode: ?screen renders only the app screen, edge to edge (nowincode capture) -->
+<script>if(new URLSearchParams(location.search).has('screen')){document.documentElement.classList.add('nic-screen');addEventListener('DOMContentLoaded',()=>{const d=document.createElement('div');d.id='nic-fill';document.body.prepend(d)})}</script>
+<style>html.nic-screen,html.nic-screen body{margin:0!important;padding:0!important;overflow:clip!important}#nic-fill{display:none}html.nic-screen #nic-fill{display:block;position:fixed;inset:0;z-index:-1;background:transparent}html.nic-screen body{position:relative!important;z-index:0!important}</style>
+<!-- /nic:screen-mode -->
+</head>
+<body>
+<div class="stage" id="stage"></div>
+<div class="controls">
+  <div class="seg" id="tone">
+    <button data-v="colour" aria-pressed="true">Colour</button>
+    <button data-v="mono" aria-pressed="false">Mono</button>
+  </div>
+  <button class="btn" id="replay">Replay demo</button>
+</div>
+
+<script src="src/gaugeCore.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = window.GaugeCore, L = C.L;
+  var Q = new URLSearchParams(location.search);
+  var FREEZE = Q.has('t') ? parseFloat(Q.get('t')) : null;
+  var LOOP = Q.has('demo');
+  var STATIC = Q.has('score') ? parseFloat(Q.get('score')) : null;
+  if (STATIC != null) FREEZE = 0; // static: no loop, no demo
+  if (Q.has('shot')) document.body.classList.add('shot');
+  var themes = Q.get('theme') ? [Q.get('theme')] : ['light', 'dark'];
+  var tone = Q.get('tone') === 'mono' ? 'mono' : 'colour';
+  var SVGNS = 'http://www.w3.org/2000/svg';
+
+  function el(tag, cls, parent, ns) {
+    var e = ns ? document.createElementNS(SVGNS, tag) : document.createElement(tag);
+    if (cls) e.setAttribute('class', cls);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  function Gauge(themeName) {
+    var g = this;
+    g.theme = themeName;
+    g.slot = el('div', 'slot ' + themeName, document.getElementById('stage'));
+    g.root = el('div', 'gag', g.slot);
+    g.root.dataset.theme = themeName;
+    var head = el('div', 'gag-head', g.root);
+    g.title = el('div', 'gag-title', head);
+    g.pillBox = el('div', 'gag-pills', head);
+    g.pillEls = {};
+    g.svg = el('svg', 'gag-plot', g.root, true);
+    g.svg.setAttribute('width', L.plotW); g.svg.setAttribute('height', L.plotH);
+    g.svg.setAttribute('viewBox', '0 0 ' + L.plotW + ' ' + L.plotH);
+    g.svg.setAttribute('tabindex', '0');
+    g.svg.setAttribute('role', 'slider');
+    g.svg.setAttribute('aria-label', 'Credit score');
+    g.svg.setAttribute('aria-valuemin', C.MIN); g.svg.setAttribute('aria-valuemax', C.MAX);
+    var tg = el('g', null, g.svg, true);
+    g.lines = [];
+    for (var i = 0; i < L.n; i++) {
+      var ln = el('line', 'gag-tick', tg, true);
+      ln.setAttribute('stroke-width', L.tickW); ln.setAttribute('stroke-linecap', 'round');
+      g.lines.push(ln);
+    }
+    g.knob = el('circle', 'gag-knob', g.svg, true);
+    g.fig = el('text', 'gag-figure', g.svg, true); g.fig.setAttribute('text-anchor', 'middle');
+    g.of = el('text', 'gag-of', g.svg, true); g.of.setAttribute('text-anchor', 'middle');
+    g.touch = el('div', 'touch', g.slot);
+
+    if (STATIC != null) {
+      // settled state at a given score (optionally held) — for side-by-side checks against the source
+      g.state = C.createState(STATIC, { sweep: false });
+      if (Q.has('held')) { g.state.held = true; g.state.g = 1; }
+      g.demo = null;
+    } else {
+      g.state = FREEZE != null ? C.simulateDemo(FREEZE) : C.createState(682);
+      g.demo = FREEZE == null ? { t: 0, prev: null, loop: LOOP } : null;
+    }
+
+    // pointer → plot coordinates
+    function local(e) {
+      var r = g.svg.getBoundingClientRect();
+      return [(e.clientX - r.left) * L.plotW / r.width, (e.clientY - r.top) * L.plotH / r.height];
+    }
+    g.svg.addEventListener('pointerdown', function (e) {
+      if (FREEZE != null) return;
+      g.demo = null; g.touch.removeAttribute('data-on');
+      g.svg.setPointerCapture(e.pointerId);
+      var p = local(e); C.pointer(g.state, 'down', p[0], p[1]); g.svg.setAttribute('data-held', '');
+      wake();
+    });
+    g.svg.addEventListener('pointermove', function (e) {
+      if (!g.state.held) return;
+      var p = local(e); C.pointer(g.state, 'move', p[0], p[1]); wake();
+    });
+    var up = function () { if (!g.state.held) return; C.pointer(g.state, 'up'); g.svg.removeAttribute('data-held'); wake(); };
+    g.svg.addEventListener('pointerup', up);
+    g.svg.addEventListener('pointercancel', up);
+    g.svg.addEventListener('keydown', function (e) {
+      var d = { ArrowRight: 10, ArrowUp: 10, ArrowLeft: -10, ArrowDown: -10 }[e.key];
+      if (!d || FREEZE != null) return;
+      e.preventDefault(); g.demo = null; C.nudge(g.state, d); wake();
+    });
+  }
+
+  Gauge.prototype.render = function () {
+    var f = C.frame(this.state, this.theme, tone);
+    this.last = f;
+    var r = this.root;
+    r.style.background = f.card.bg;
+    r.style.color = f.title.color;
+    this.title.textContent = f.title.text;
+    // pills (keyed crossfade)
+    var keep = {};
+    for (var i = 0; i < f.pills.length; i++) {
+      var p = f.pills[i], e = this.pillEls[p.key];
+      if (!e) { e = this.pillEls[p.key] = el('div', 'gag-band', this.pillBox); e.textContent = p.text; }
+      e.classList.toggle('leaving', i < f.pills.length - 1);
+      e.style.background = p.bg; e.style.color = p.color;
+      e.style.opacity = p.opacity;
+      e.style.filter = p.blur > 0.01 ? 'blur(' + p.blur + 'px)' : 'none';
+      keep[p.key] = 1;
+    }
+    for (var k in this.pillEls) if (!keep[k]) { this.pillEls[k].remove(); delete this.pillEls[k]; }
+    // ticks
+    for (var j = 0; j < f.ticks.length; j++) {
+      var t = f.ticks[j], ln = this.lines[j];
+      ln.setAttribute('x1', t.x1); ln.setAttribute('y1', t.y1);
+      ln.setAttribute('x2', t.x2); ln.setAttribute('y2', t.y2);
+      ln.setAttribute('stroke', t.stroke);
+    }
+    this.knob.setAttribute('cx', f.knob.cx); this.knob.setAttribute('cy', f.knob.cy);
+    this.knob.setAttribute('r', f.knob.r); this.knob.setAttribute('fill', f.knob.fill);
+    this.fig.setAttribute('x', f.figure.x); this.fig.setAttribute('y', f.figure.y);
+    this.fig.setAttribute('fill', f.figure.color); this.fig.textContent = f.figure.text;
+    this.of.setAttribute('x', f.of.x); this.of.setAttribute('y', f.of.y);
+    this.of.setAttribute('fill', f.of.color); this.of.textContent = f.of.text;
+    this.svg.setAttribute('aria-valuenow', f.score);
+    this.svg.setAttribute('aria-valuetext', f.score + ', ' + f.band);
+    // demo pointer marker
+    var ptr = FREEZE != null ? this.state.demoPtr : (this.demo && this.demo.prev);
+    if (ptr) {
+      var x = L.pad + ptr.x, y = L.plotTop + ptr.y;
+      var inside = x > 0 && x < L.cardW && y > 0 && y < L.cardH;
+      this.touch.style.left = x + 'px'; this.touch.style.top = y + 'px';
+      this.touch.toggleAttribute('data-on', inside);
+      this.touch.toggleAttribute('data-down', !!ptr.down);
+    }
+  };
+
+  var gauges = themes.map(function (t) { return new Gauge(t); });
+
+  // ── loop ───────────────────────────────────────────────
+  var raf = 0, last = 0;
+  function wake() { if (!raf && FREEZE == null) { last = 0; raf = requestAnimationFrame(tick); } }
+  function tick(now) {
+    raf = 0;
+    var dt = last ? Math.min((now - last) / 1000, 0.05) : 1 / 60;
+    last = now;
+    var busy = false;
+    gauges.forEach(function (g) {
+      if (g.demo) {
+        g.demo.t += dt;
+        if (!g.demo.loop && g.demo.t * 1000 > C.DEMO_PERIOD) { g.demo = null; g.touch.removeAttribute('data-on'); }
+        else {
+          var ptr = C.demoPointer(g.demo.t);
+          C.applyDemo(g.state, g.demo.prev, ptr);
+          g.demo.prev = ptr;
+          busy = true;
+        }
+      }
+      C.step(g.state, dt);
+      g.render();
+      if (!C.settled(g.state)) busy = true;
+    });
+    if (busy) { raf = requestAnimationFrame(tick); } else last = 0;
+  }
+
+  // ── controls ───────────────────────────────────────────
+  document.querySelectorAll('#tone button').forEach(function (b) {
+    b.setAttribute('aria-pressed', b.dataset.v === tone ? 'true' : 'false');
+    b.addEventListener('click', function () {
+      tone = b.dataset.v;
+      document.querySelectorAll('#tone button').forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+      gauges.forEach(function (g) { g.render(); });
+      wake();
+    });
+  });
+  document.getElementById('replay').addEventListener('click', function () {
+    gauges.forEach(function (g) {
+      if (g.state.held) C.pointer(g.state, 'up');
+      g.demo = { t: 0, prev: null, loop: LOOP };
+    });
+    wake();
+  });
+
+  // ── hooks for parity checks ───────────────────────────
+  window.__gauges = gauges;
+  window.__frameFor = function (theme) {
+    var g = gauges.filter(function (x) { return x.theme === theme; })[0];
+    return g && g.last;
+  };
+
+  var ready = document.fonts && document.fonts.load
+    ? Promise.all([
+        document.fonts.load('500 16px GagInter'), document.fonts.load('400 13px GagInter'),
+        document.fonts.load('600 44px GagJakarta')])
+    : Promise.resolve();
+  ready.then(function () {
+    gauges.forEach(function (g) { g.render(); });
+    window.__ready = true;
+    wake();
+  });
+})();
+</script>
+</body>
+</html>

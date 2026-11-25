@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lody · Sticky Section Headers & Progressive Blur</title>
+<style>
+  /* iOS 上中文字形比 macOS Chrome 的 PingFang 小约 4%（原片实测墨迹 0.8625em）：只对中文区段缩 96%，字距在 JS 里按区段补 */
+  @font-face { font-family: "PF96"; src: local("PingFangSC-Regular"), local("PingFang SC Regular"), local("PingFang SC"); font-weight: 400; size-adjust: 96%; unicode-range: U+2E80-9FFF, U+3000-303F, U+FF00-FFEF; }
+  @font-face { font-family: "PF96"; src: local("PingFangSC-Medium"), local("PingFang SC Medium"); font-weight: 500; size-adjust: 96%; unicode-range: U+2E80-9FFF, U+3000-303F, U+FF00-FFEF; }
+  @font-face { font-family: "PF96"; src: local("PingFangSC-Semibold"), local("PingFang SC Semibold"); font-weight: 600; size-adjust: 96%; unicode-range: U+2E80-9FFF, U+3000-303F, U+FF00-FFEF; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #ECEEF1; font-family: "PF96", -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif; -webkit-font-smoothing: antialiased; }
+  body { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  #stage { position: relative; transform-origin: center center; display: flex; flex-direction: column; align-items: center; }
+  .phone { position: relative; width: 434px; height: 906px; border-radius: 76px; background: #0b0b0c; padding: 16px;
+           box-shadow: 0 40px 90px rgba(20,30,60,0.20), 0 0 0 1.5px #2a2a2c inset, 0 0 0 2px #c9cbd3; }
+  .screen { position: relative; width: 402px; height: 874px; border-radius: 60px; overflow: hidden; background: #fff; isolation: isolate; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+  .screen img { -webkit-user-drag: none; user-drag: none; pointer-events: none; }
+  body.shot { background: #fff; align-items: flex-start; justify-content: flex-start; }
+  .shot #stage { transform: none !important; }
+  .shot .phone { padding: 0; background: none; box-shadow: none; border-radius: 0; width: 402px; height: 874px; }
+  .shot .screen { border-radius: 0; }
+  .shot #ctrl { display: none; }
+  .flat .phone, .flat .screen { height: var(--flatH) !important; }
+  .flat #blurs, .flat #fade, .flat #labelsUnder, .flat #tab, .flat #bfade, .flat #ind { display: none; }
+
+  #content { position: absolute; left: 0; top: 0; width: 402px; will-change: transform; }
+  .abs { position: absolute; }
+  .line { position: absolute; display: flex; align-items: center; white-space: nowrap; }
+  .tt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #191919; }
+  .tm { flex: none; margin-left: 9px; color: #888888; }
+  .sub { position: absolute; color: #626262; font-size: 13px; white-space: nowrap; }
+  .chdr { position: absolute; color: #626262; font-size: 13px; white-space: nowrap; }
+  .av { position: absolute; border-radius: 50%; overflow: hidden; }
+  .av img, .sq img { width: 100%; height: 100%; display: block; }
+  .sq { position: absolute; border-radius: 3.5px; overflow: hidden; }
+  .tree { position: absolute; border: 0 solid #D2D2D2; }
+  .gdot { position: absolute; border-radius: 1.1px; background: #8CA6E8; }
+  svg.ic { position: absolute; overflow: visible; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+
+  .blurL { position: absolute; left: 0; top: 0; width: 402px; pointer-events: none; }
+  #fade { position: absolute; left: 0; top: 0; width: 402px; pointer-events: none; }
+  .lblLayer { position: absolute; left: 0; top: 0; width: 402px; height: 0; pointer-events: none; }
+  .lbl { position: absolute; left: 19.0px; top: 0; height: 30px; color: #868686; font-size: 16px; white-space: nowrap; will-change: transform, opacity; }
+
+  .pill { position: absolute; border-radius: 22px; background: linear-gradient(180deg, #ffffff 0%, #fbfbfb 30%, #f9f9f9 55%, #fdfdfd 100%);
+          box-shadow: 0 0 0 0.6px rgba(0,0,0,0.11), 0 3px 10px rgba(0,0,0,0.045), 0 0 0 1.2px rgba(255,255,255,0.9) inset; }
+  .status { position: absolute; left: 0; top: 0; width: 402px; height: 56px; pointer-events: none; }
+  .status .time { position: absolute; left: 34px; top: 21.1px; width: 60px; text-align: center; font: 600 17px/22px -apple-system, "SF Pro Text", system-ui; letter-spacing: -0.3px; color: #000; }
+  .island { position: absolute; left: 138.3px; top: 13.7px; width: 124.7px; height: 35.9px; border-radius: 18px; background: #000; }
+  #ind { position: absolute; border-radius: 1.5px; background: rgba(0,0,0,0.33); pointer-events: none; }
+
+  #bfade { position: absolute; left: 0; top: 800px; width: 402px; height: 74px; pointer-events: none; background: linear-gradient(180deg, rgba(255,255,255,0) 0, rgba(255,255,255,0.42) 60%, rgba(255,255,255,0.6) 100%); }
+  .tabbar { position: absolute; border-radius: 31px; background: rgba(252,252,252,0.90); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
+            box-shadow: 0 0 0 0.6px rgba(0,0,0,0.10), 0 6px 18px rgba(0,0,0,0.06), 0 0 0 1.2px rgba(255,255,255,0.9) inset; }
+  .tabsel { position: absolute; border-radius: 27px; background: #E9E9EA; }
+  .tabtx { position: absolute; width: 80px; margin-left: -40px; text-align: center; font: 600 10px/12px "PF96", -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; }
+
+  #ctrl { margin-top: 18px; display: flex; gap: 8px; align-items: center; font: 500 13px/1 -apple-system, "PingFang SC", system-ui; color: #4a4d57; }
+  #ctrl button { border: 0; border-radius: 999px; padding: 8px 14px; background: #fff; color: #333; font: inherit; cursor: pointer; box-shadow: 0 0 0 1px rgba(0,0,0,0.08); }
+  #ctrl button.on { background: #1d1f24; color: #fff; }
+  #ctrl .hint { margin-left: 6px; opacity: 0.7; }
+</style>
+<!-- nic:screen-mode: ?screen renders only the app screen, edge to edge (nowincode capture) -->
+<script>if(new URLSearchParams(location.search).has('screen'))document.documentElement.classList.add('nic-screen')</script>
+<style>html.nic-screen #stage{transform:scale(.97761,.97483)!important;transform-origin:0 0}html.nic-screen .island,html.nic-screen #ctrl{display:none}</style>
+<!-- /nic:screen-mode -->
+</head>
+<body>
+<div id="stage">
+  <div class="phone"><div class="screen" id="screen">
+    <div id="content"></div>
+    <div id="labelsUnder" class="lblLayer"></div>
+    <div id="blurs"></div>
+    <div id="fade"></div>
+    <div id="labels" class="lblLayer"></div>
+    <div id="chrome"></div>
+    <div id="ind"></div>
+    <div id="bfade"></div>
+    <div id="tab"></div>
+  </div></div>
+  <div id="ctrl">
+    <button id="bDemo" class="on">Demo 原片滚动</button>
+    <button id="bLive">Interactive 自己滚</button>
+    <button id="bReplay">重播</button>
+    <span class="hint" id="hint"></span>
+  </div>
+</div>
+<script src="src/lodyCore.js"></script>
+<script>
+(function () {
+  const Core = window.LodyCore, L = Core.L, C = Core.C, LAY = Core.LAYOUT, F = L.font;
+  const q = new URLSearchParams(location.search);
+  const SHOT = q.has('shot');
+  if (SHOT) document.body.classList.add('shot');
+  if (q.has('flat')) { document.body.classList.add('flat'); document.body.style.setProperty('--flatH', LAY.contentH + 'px'); }
+  const $ = (id) => document.getElementById(id);
+  const el = (cls, css, parent, html) => { const e = document.createElement('div'); if (cls) e.className = cls; if (css) e.style.cssText = css; if (html != null) e.innerHTML = html; parent.appendChild(e); return e; };
+  const NS = 'http://www.w3.org/2000/svg';
+  function icon(name, size, color, sw, cx, cy, parent) {
+    const s = document.createElementNS(NS, 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('class', 'ic');
+    s.style.cssText = `left:${cx - size / 2}px;top:${cy - size / 2}px;width:${size}px;height:${size}px;stroke:${color};stroke-width:${sw}`;
+    Core.ICONS[name].forEach(d => { let n; if (d[0] === 'c') { n = document.createElementNS(NS, 'circle'); n.setAttribute('cx', d[1]); n.setAttribute('cy', d[2]); n.setAttribute('r', d[3]); } else { n = document.createElementNS(NS, 'path'); n.setAttribute('d', d[1]); } s.appendChild(n); });
+    parent.appendChild(s); return s;
+  }
+  const REPO_SVG = '<svg viewBox="0 0 28 28" width="100%" height="100%" style="display:block;overflow:visible"><circle cx="14" cy="14" r="14" fill="#6F6F6F"/><path d="M13 13V3.6A10.4 10.4 0 0 0 3.6 13Z" fill="#CFE6EA"/><path d="M13 3h2v23h-2z" fill="#fff"/><path d="M3 13h11v2H3z" fill="#fff"/><circle cx="19.4" cy="9.4" r="2.3" fill="#6F6F6F" stroke="#fff" stroke-width="1.6"/><rect x="15.4" y="16.4" width="14" height="8.6" rx="4.3" transform="rotate(40 22.4 20.7)" fill="#fff" stroke="#6F6F6F" stroke-width="1.7"/></svg>';
+  // HTML 专用字距：西文是 Chrome 与原片的实测差，中文 = iOS 系统字距(trak) + 96% 缩放的补偿
+  const TRAK = { 10: 0.12, 12: 0, 13: -0.08, 15: -0.23, 16: -0.31, 17: -0.43 }, LAT = { 10: 0, 12: 0, 13: -0.05, 15: -0.10, 16: -0.14, 17: -0.2 };
+  function setText(e, str, size) {
+    e.textContent = '';
+    Core.textRuns(str).forEach(r => {
+      const sp = document.createElement('span'); sp.textContent = r.s;
+      sp.style.letterSpacing = (r.k === 'cjk' ? size * 0.04 + TRAK[size] : r.k === 'lat' ? LAT[size] : 0) + 'px';
+      if (r.gap) sp.style.marginLeft = size / 8 + 'px';
+      if (r.k === 'emoji') { sp.style.fontSize = size * 1.22 + 'px'; sp.style.lineHeight = '1px'; sp.style.marginLeft = '1.2px'; sp.style.marginRight = '1.6px'; sp.style.verticalAlign = '-2.1px'; }
+      e.appendChild(sp);
+    });
+  }
+  const textBox = (f, yc) => `top:${yc - f.lh / 2 + f.dy}px;height:${f.lh}px;line-height:${f.lh}px;font-size:${f.size}px;`;
+
+  // ---------- 内容层 ----------
+  const content = $('content'); content.style.height = LAY.contentH + 'px';
+  const grids = [];
+  function statusIcon(kind, cx, cy, parent) {
+    if (kind === 'merge') icon('merge', 14, C.merge, 2.5, cx, cy - 1.25, parent);
+    else { cx += 1.2; cy += 0.25; icon('pr', 16.4, '#8A8A8A', 2.2, cx, cy, parent);
+      if (kind === 'prcheck') icon('check', 16.4, C.green, 2.5, cx, cy, parent);
+      else el('abs', `left:${cx + 3}px;top:${cy + 2.8}px;width:5.4px;height:5.4px;border-radius:50%;background:${C.brown}`, parent); }
+  }
+  LAY.rows.forEach(r => {
+    if (r.kind === 'chdr') {
+      icon('chevron', 15.2, C.chev, 2.2, 24.8, r.tc + 0.75, content);
+      setText(el('chdr', `left:36.3px;${textBox(F.chdr, r.tc)}`, content), r.text, F.chdr.size); return;
+    }
+    const d = r.d, f = r.kind === 'top' ? F.title : F.childTitle;
+    const right = d.slot ? L.slotTitleRight : L.timeRight;
+    const line = el('line', `left:${r.x}px;width:${right - r.x}px;${textBox(f, r.tc)}`, content);
+    const tt = el('tt', d.bold ? 'font-weight:' + L.boldWeight : '', line); setText(tt, d.t, f.size);
+    if (d.pre) { const w = el('', 'flex:none;position:relative;width:15px;height:15px;margin-left:9px;margin-right:4px', line); statusIcon(d.pre, 7.5, 7.5, w); }
+    if (d.time) { const tm = el('tm', `font-size:${F.time.size}px;position:relative;top:${F.time.dy - f.dy}px`, line); setText(tm, d.time, F.time.size); }
+    if (d.slot === 'dot') el('abs', `left:${L.slotCx - 4.1}px;top:${r.tc - 4.1}px;width:8.2px;height:8.2px;border-radius:50%;background:${C.blue}`, content);
+    if (d.slot === 'grid') { const g = []; for (let i = 0; i < 9; i++) g.push(el('gdot', `left:${L.slotCx - 6.7 + (i % 3) * 4.9}px;top:${r.tc - 0.9 - 6.7 + ((i / 3) | 0) * 4.9}px;width:3.6px;height:3.6px`, content)); grids.push({ g, id: r.id }); }
+    el('av', `left:${L.avatarCx - L.avatarD / 2}px;top:${r.tc - L.avatarD / 2}px;width:${L.avatarD}px;height:${L.avatarD}px`, content, '<img src="assets/avatar.png" alt="">');
+    if (d.sub) {
+      const D = d.sq ? 16.1 : L.subIconD;
+      if (d.sq) el('sq', `left:${r.x + 0.2}px;top:${r.sc - D / 2 + 0.25}px;width:${D}px;height:${D}px`, content, '<img src="assets/lody_sq.png" alt="">');
+      else el('abs', `left:${r.x + 0.2}px;top:${r.sc - D / 2 - 0.3}px;width:${D}px;height:${D}px`, content, REPO_SVG);
+      setText(el('sub', `left:${r.x + L.subTextDX}px;${textBox(F.sub, r.sc)}`, content), d.sub, F.sub.size);
+      if (d.st) statusIcon(d.st, L.statusCx, r.sc, content);
+    }
+  });
+  LAY.trees.forEach(t => {
+    const last = t.elbows[t.elbows.length - 1];
+    el('tree', `left:${t.x - 0.5}px;top:${t.y0}px;width:0;height:${last - L.treeR - t.y0}px;border-left-width:1px`, content);
+    t.elbows.forEach(e => el('tree', `left:${t.x - 0.5}px;top:${e - L.treeR}px;width:${L.treeEndX - t.x + 0.5}px;height:${L.treeR + 0.5}px;border-left-width:1px;border-bottom-width:1px;border-bottom-left-radius:${L.treeR}px`, content));
+  });
+
+  // ---------- 顶部渐进模糊 + 泛白 ----------
+  {
+    const m = 'linear-gradient(180deg,' + Core.BLUR.mask.map(s => `rgba(0,0,0,${s[1]}) ${s[0]}px`).join(',') + ')';
+    el('blurL', `height:${Core.BLUR.bottom}px;-webkit-backdrop-filter:blur(${Core.BLUR.sigma}px);backdrop-filter:blur(${Core.BLUR.sigma}px);-webkit-mask-image:${m};mask-image:${m}`, $('blurs'));
+  }
+  $('fade').style.height = Core.FADE_BOTTOM + 'px';
+  $('fade').style.background = 'linear-gradient(180deg,' + Core.FADE.map(s => `rgba(255,255,255,${s[1]}) ${s[0]}px`).join(',') + ')';
+
+  // ---------- 吸顶标题层 ----------
+  const mkLbl = (host) => LAY.labels.map(l => { const e = el('lbl', `line-height:30px;margin-top:${F.label.dy}px`, $(host)); setText(e, l.text, F.label.size); return e; });
+  const lblOver = mkLbl('labels'), lblUnder = mkLbl('labelsUnder');
+
+  // ---------- 顶栏 / 状态栏 / Tab 栏 ----------
+  const ch = $('chrome');
+  const pl = el('pill', `left:${L.pillL.x}px;top:${L.pillTop}px;width:${L.pillL.w}px;height:${L.pillH}px`, ch);
+  el('av', 'left:5.9px;top:5.6px;width:32px;height:32px;background:#000', pl, '<img src="assets/jellyfish.png" alt="">');
+  el('abs', 'left:49.6px;top:11px;height:22px;line-height:22px;font-size:17px;font-weight:600;letter-spacing:-0.35px;color:#111', pl, 'Lody');
+  icon('chevron', 16.6, '#555', 1.9, 98.5, 22.6, pl);
+  const pr = el('pill', `left:${L.pillR.x}px;top:${L.pillTop}px;width:${L.pillR.w}px;height:${L.pillH}px`, ch);
+  icon('search', 24.6, '#111', 2.25, 23.8, 22.4, pr);
+  icon('filter', 24, '#111', 2.2, 81.05, 21.95, pr);
+  const st = el('status', '', ch);
+  el('time', '', st, '09:41');
+  st.insertAdjacentHTML('beforeend',
+    '<svg class="abs" style="left:90.6px;top:24.6px" width="15" height="15.4" viewBox="0 0 15 15.4"><path d="M7.4 1.1c-2.5 0-4.3 1.9-4.3 4.5v2.5c0 .7-.3 1.3-.8 1.8l-.5.5c-.5.5-.2 1.3.5 1.3h10.2c.7 0 1-.8.5-1.3l-.5-.5c-.5-.5-.8-1.1-.8-1.8V5.600c0-2.6-1.800-4.500-4.300-4.500zM5.600 12.600a1.900 1.900 0 0 0 3.600 0z" fill="#000"/><path d="M1.300 1.300l12.600 12.800" stroke="#fff" stroke-width="3.200" stroke-linecap="round"/><path d="M1.300 1.300l12.600 12.800" stroke="#000" stroke-width="1.500" stroke-linecap="round"/></svg>' +
+    '<svg class="abs" style="left:288.3px;top:25.4px" width="19.8" height="13.6" viewBox="0 0 19.8 13.6"><rect x="0" y="5.600" width="3.500" height="3.400" rx="1.200"/><rect x="5.400" y="3.800" width="3.500" height="5.200" rx="1.200"/><rect x="10.800" y="2" width="3.500" height="7" rx="1.200"/><rect x="16.200" y="0" width="3.500" height="9" rx="1.200"/><g fill="#b9b9b9"><circle cx="1.750" cy="11.900" r="1.500"/><circle cx="7.150" cy="11.900" r="1.500"/><circle cx="12.550" cy="11.900" r="1.500"/><circle cx="17.950" cy="11.900" r="1.500"/></g></svg>' +
+    '<svg class="abs" style="left:314.1px;top:25.6px" width="18.6" height="13.2" viewBox="0 0 18.6 13.2" fill="none" stroke="#000" stroke-linecap="round"><path d="M1.500 4.900a11.300 11.300 0 0 1 15.600 0" stroke-width="2.300"/><path d="M4.700 8.100a6.700 6.700 0 0 1 9.200 0" stroke-width="2.300"/><circle cx="9.300" cy="11.100" r="1.700" fill="#000" stroke="none"/></svg>' +
+    '<svg class="abs" style="left:339.4px;top:25.4px" width="30" height="13.6" viewBox="0 0 30 13.6"><rect x="0" y="0" width="26.600" height="13.600" rx="4.300" fill="#000"/><path d="M27.900 4.300c1 .4 1.700 1.300 1.700 2.500s-.7 2.100-1.700 2.500z" fill="#000"/></svg>');
+  el('island', '', st);
+  const T = L.tab, tab = $('tab');
+  el('tabbar', `left:${T.x}px;top:${T.y}px;width:${T.w}px;height:${T.h}px`, tab);
+  el('tabsel', `left:${T.centers[0] - T.selW / 2}px;top:${T.y + (T.h - T.selH) / 2}px;width:${T.selW}px;height:${T.selH}px`, tab);
+  [['messages', '对话'], ['clock', '定时任务'], ['settings', '设置']].forEach((it, i) => {
+    const col = i === 0 ? C.tabSel : '#111';
+    icon(it[0], 23, col, 1.9, T.centers[i], T.iconCy, tab);
+    el('tabtx', `left:${T.centers[i]}px;top:${T.textCy - 6}px;color:${col}`, tab, it[1]);
+  });
+  el('tabbar', `left:${T.composeCx - T.composeD / 2}px;top:${T.y}px;width:${T.composeD}px;height:${T.composeD}px`, tab);
+  icon('compose', 23, '#111', 2, T.composeCx, T.y + T.h / 2, tab);
+
+  // ---------- 渲染 ----------
+  const ind = $('ind');
+  function render(fr, tAnim) {
+    content.style.transform = `translate3d(0,${-fr.scroll}px,0)`;
+    fr.labels.forEach((s, i) => {
+      [[lblOver[i], s.over], [lblUnder[i], s.under]].forEach(([e, o]) => {
+        const vis = s.top > -40 && s.top < Core.H && o > 0.004;
+        e.style.display = vis ? '' : 'none'; if (!vis) return;
+        e.style.transform = `translate3d(0,${s.top}px,0)`; e.style.opacity = o;
+      });
+    });
+    ind.style.left = fr.ind.x + 'px'; ind.style.width = fr.ind.w + 'px'; ind.style.top = fr.ind.top + 'px'; ind.style.height = fr.ind.h + 'px'; ind.style.opacity = fr.indOpacity;
+    for (const g of grids) for (let i = 0; i < 9; i++) { const a = Core.gridAlpha(tAnim + g.id * 0.37, i); g.g[i].style.opacity = a; g.g[i].style.transform = `scale(${Core.gridScale(a)})`; }
+    window.__state = fr;
+  }
+
+  // ---------- 模式：Demo（原片滚动表）/ Interactive（拖动 + 滚轮 + 惯性 + 橡皮筋） ----------
+  let mode = 'demo', frozen = null, t0 = performance.now(), S = 0, v = 0, dragging = false, lastMove = -1e9, lastY = 0, lastT = 0, wheelUntil = 0, prev = performance.now();
+  const MAX = LAY.maxScroll;
+  function setMode(m) { mode = m; $('bDemo').classList.toggle('on', m === 'demo'); $('bLive').classList.toggle('on', m === 'live'); $('hint').textContent = m === 'demo' ? '' : '在屏幕上拖动或滚轮'; if (m === 'demo') t0 = performance.now(); else { S = Math.max(0, Math.min(MAX, window.__state ? window.__state.scroll : 0)); v = 0; } }
+  $('bDemo').onclick = () => setMode('demo'); $('bLive').onclick = () => setMode('live'); $('bReplay').onclick = () => setMode('demo');
+  const scr = $('screen');
+  const overOf = (s) => s < 0 ? s : (s > MAX ? s - MAX : 0);
+  scr.addEventListener('wheel', (e) => { e.preventDefault(); if (mode !== 'live') setMode('live'); const o = overOf(S); S += e.deltaY * (o && Math.sign(o) === Math.sign(e.deltaY) ? 1 / (1 + Math.abs(o) / 28) : 1); v = 0; wheelUntil = performance.now() + 90; lastMove = performance.now(); }, { passive: false });
+  scr.addEventListener('pointerdown', (e) => { if (mode !== 'live') setMode('live'); dragging = true; v = 0; lastY = e.clientY; lastT = performance.now(); scr.setPointerCapture(e.pointerId); scr.style.cursor = 'grabbing'; });
+  scr.addEventListener('pointermove', (e) => { if (!dragging) return; const now = performance.now(), sc = stageScale(), dy = (lastY - e.clientY) / sc, o = overOf(S); S += dy * (o && Math.sign(o) === Math.sign(dy) ? 1 / (1 + Math.abs(o) / 40) : 1); const dt = Math.max(1, now - lastT); v = 0.6 * v + 0.4 * (dy / dt * 1000); lastY = e.clientY; lastT = now; lastMove = now; });
+  const up = () => { if (!dragging) return; dragging = false; scr.style.cursor = 'grab'; if (performance.now() - lastT > 80) v = 0; };
+  scr.addEventListener('pointerup', up); scr.addEventListener('pointercancel', up);
+  function stepLive(dt, now) {
+    if (dragging || now < wheelUntil) return;
+    const o = overOf(S);
+    if (o) { const k = 190, c = 2 * Math.sqrt(k); const n = Math.max(1, Math.ceil(dt / 0.004)), h = dt / n; let x = o; for (let i = 0; i < n; i++) { v += (-k * x - c * v) * h; x += v * h; } S += x - o; if (Math.abs(x) < 0.02 && Math.abs(v) < 2) { S -= x; v = 0; } lastMove = now; }
+    else if (Math.abs(v) > 3) { S += v * dt; v *= Math.pow(0.998, dt * 1000); lastMove = now; } else v = 0;
+  }
+  function stageScale() { if (SHOT) return 1; return Math.min(1, (innerHeight - 24) / (906 + 52), (innerWidth - 24) / 434); }
+  function fit() { if (!SHOT) $('stage').style.transform = `scale(${stageScale()})`; }
+  addEventListener('resize', fit); fit();
+
+  function tick(now) {
+    if (frozen != null) return;
+    const dt = Math.min(0.05, (now - prev) / 1000); prev = now;
+    if (mode === 'demo') { const t = (now - t0) / 1000; render(Core.frame(t), t); }
+    else { stepLive(dt, now); const fr = Core.frameAtScroll(S); const idle = (now - lastMove) / 1000; fr.indOpacity = idle < 0.9 ? 1 : Math.max(0, 1 - (idle - 0.9) / 0.3); render(fr, now / 1000); }
+    requestAnimationFrame(tick);
+  }
+  // 定帧钩子：?t=秒（原片时间轴）或 ?s=滚动量；window.__freezeAt(t) / window.__setScroll(S)
+  window.__freezeAt = (t) => { frozen = t; render(Core.frame(t), t); };
+  window.__setScroll = (s) => { frozen = -1; const fr = Core.frameAtScroll(s); fr.indOpacity = q.has('ind') || s !== 0 ? 1 : 0; render(fr, 0); };
+  if (q.has('s')) window.__setScroll(parseFloat(q.get('s')));
+  else if (q.has('t')) window.__freezeAt(parseFloat(q.get('t')));
+  else requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

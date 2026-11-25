@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task Interaction</title>
+<style>
+  :root { --scale: 1; }
+  html, body { margin: 0; height: 100%; background: #FFFFFF; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  #stage { width: calc(393px * var(--scale)); height: calc(852px * var(--scale)); position: relative; }
+  #screen { position: absolute; left: 0; top: 0; width: 393px; height: 852px; transform-origin: 0 0; transform: scale(var(--scale));
+    background: #F7F7F7; border-radius: 56px; overflow: hidden;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.035), 0 1px 2px rgba(0,0,0,0.04); }
+  .abs { position: absolute; }
+  .t { position: absolute; white-space: nowrap; }
+  .svg { position: absolute; line-height: 0; }
+  .svg svg { display: block; }
+  .card { position: absolute; left: 7.6px; width: 378px; height: 70.4px; border-radius: 22px; background: #FFFFFF;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.035), 0 4px 10px rgba(0,0,0,0.025); will-change: transform; }
+  .content { position: absolute; inset: 0; }
+  .tile { position: absolute; left: 8px; top: 8px; width: 54.6px; height: 54.6px; border-radius: 16px; background: #F8F8F8;
+    display: flex; align-items: center; justify-content: center; }
+  .check { position: absolute; left: 322.9px; top: 15.2px; width: 40px; height: 40px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .check .ring { position: absolute; left: 7px; top: 7px; width: 26px; height: 26px; box-sizing: border-box; border-radius: 50%; border: 1.8px solid #CBCBCB; }
+  .check .fill { position: absolute; left: 7px; top: 7px; width: 26px; height: 26px; border-radius: 50%;
+    background: linear-gradient(180deg, #2BC26B 0%, #3FC87C 55%, #5DD092 100%); opacity: 0; }
+  .check .fill .svg { left: 0; top: 0; }
+  #controls { margin-top: 18px; display: flex; gap: 10px; }
+  #controls button { font: 500 13px -apple-system, BlinkMacSystemFont, sans-serif; color: #444; background: #F1F1F1; border: 0;
+    border-radius: 999px; padding: 7px 14px; cursor: pointer; }
+  body.capture #controls { display: none; }
+</style>
+<!-- nic:screen-mode: ?screen renders only the app screen, edge to edge (nowincode capture) -->
+<script>if(new URLSearchParams(location.search).has('screen'))document.documentElement.classList.add('nic-screen')</script>
+<style>html.nic-screen body{display:block}html.nic-screen #stage{--scale:1!important}html.nic-screen #screen{border-radius:0;box-shadow:none}html.nic-screen #controls{display:none}</style>
+<!-- /nic:screen-mode -->
+</head>
+<body>
+<div id="stage"><div id="screen"></div></div>
+<div id="controls"><button id="replay">Replay demo</button><button id="reset">Reset</button></div>
+<script src="09_motion_task_interaction.core.js"></script>
+<script src="09_motion_task_interaction.icons.js"></script>
+<script>
+(function () {
+  var C = window.TaskCore, I = window.TaskIcons, L = C.LAYOUT, K = C.COLORS;
+  var screen = document.getElementById('screen');
+  var q = new URLSearchParams(location.search);
+  var frozenT = q.has('t') ? parseFloat(q.get('t')) : null;
+  if (q.has('capture')) document.body.classList.add('capture');
+
+  function el(tag, cls, css, parent) {
+    var e = document.createElement(tag); if (cls) e.className = cls;
+    if (css) for (var k in css) e.style[k] = typeof css[k] === 'number' && k !== 'zIndex' && k !== 'opacity' ? css[k] + 'px' : css[k];
+    (parent || screen).appendChild(e); return e;
+  }
+  // Text placed by baseline: with line-height = font-size, SF baseline sits 0.856em below the box top.
+  function text(str, x, baseline, size, weight, color, parent, extra) {
+    var css = { left: x, top: baseline - 0.856 * size, fontSize: size, lineHeight: size + 'px', fontWeight: String(weight), color: color };
+    if (extra) for (var k in extra) css[k] = extra[k];
+    var e = el('div', 't', css, parent); e.textContent = str; return e;
+  }
+  function centered(str, cx, baseline, size, weight, color, parent) {
+    var e = text(str, cx - 50, baseline, size, weight, color, parent, { width: '100px', textAlign: 'center' }); return e;
+  }
+  function svg(name, x, y, parent, color) {
+    var e = el('div', 'svg', { left: x, top: y, width: I.ICONS[name].w, height: I.ICONS[name].h }, parent);
+    e.innerHTML = I.xml(name, color); return e;
+  }
+
+  // ---- status bar ----
+  text('9:41', 55.5, 38.6, 17, 600, '#000', null, { letterSpacing: '-0.2px' });
+  svg('signal', 279, 27.5); svg('wifi', 301, 27.5); svg('battery', 323, 27);
+
+  // ---- header ----
+  text('To-do list', 16, 98, 23, 700, K.ink, null, { letterSpacing: '0.3px' });
+  var W = L.week, todayRing = null;
+  C.DAYS.forEach(function (d, i) {
+    var cx = W.cx0 + W.dx * i;
+    if (d.today) el('div', 'abs', { left: cx - W.pill.w / 2, top: 121, width: W.pill.w, height: W.pill.h, borderRadius: W.pill.r, background: K.todayPill });
+    centered(d.l, cx, 133.2, W.letterSize, 400, d.today ? K.todayLetter : d.future ? K.weekdayFuture : K.weekday);
+    var host = el('div', 'svg', { left: cx - 12, top: W.ringY - 12, width: 24, height: 24 });
+    host.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="' + K.diskFuture + '"/>' +
+      '<path d="" fill="none" stroke-width="' + W.arcW + '" stroke-linecap="butt"/></svg>';
+    var ring = { disk: host.querySelector('circle'), arc: host.querySelector('path') };
+    if (d.today) todayRing = ring; else paintRing(ring, C.dayRing(i));
+    centered(String(d.d), cx, 186.3, W.dateSize, d.today ? 500 : 400, d.today ? K.ink : d.future ? K.dateFuture : K.date);
+  });
+  function paintRing(r, f) {
+    r.disk.setAttribute('fill', f.disk);
+    if (f.p > 0.0005 && f.arc) { r.arc.setAttribute('d', C.arcPath(12, 12, W.arcR, f.p)); r.arc.setAttribute('stroke', f.arc); }
+    else r.arc.setAttribute('d', '');
+  }
+
+  text('Today’s plan', 20, 238.6, 20, 700, K.ink, null, { letterSpacing: '-0.2px' });
+  var add = el('div', 'abs', { left: L.add.x, top: L.add.y, width: L.add.w, height: L.add.h, borderRadius: 13, background: K.addBg });
+  centered('Add +', L.add.w / 2, 18.2, 15, 500, K.addInk, add);
+
+  // ---- cards ----
+  var cards = C.TASKS.map(function (task, i) {
+    var card = el('div', 'card', { top: 0 });
+    var content = el('div', 'content', null, card);
+    var tile = el('div', 'tile', null, content);
+    if (task.icon === 'briefcase') el('img', null, { width: 27, height: 27 }, tile).src = 'assets/briefcase.png';
+    else if (task.icon === 'stars') {
+      var box = el('div', null, { position: 'relative', width: 30, height: 30 }, tile);
+      el('img', null, { position: 'absolute', left: 7.4, top: 0, width: 15.2, height: 15.2 }, box).src = 'assets/star.png';
+      el('img', null, { position: 'absolute', left: 0.6, top: 15.6, width: 10.6, height: 10.6 }, box).src = 'assets/star.png';
+      el('img', null, { position: 'absolute', left: 18.8, top: 15.6, width: 10.6, height: 10.6 }, box).src = 'assets/star.png';
+    } else {
+      var ic = I.ICONS[task.icon], s = el('div', 'svg', { position: 'relative', width: ic.w, height: ic.h }, tile);
+      s.innerHTML = I.xml(task.icon);
+    }
+    text(task.title, L.text.x - L.card.x, 30.6, 15.5, 600, K.ink, content, { letterSpacing: '-0.15px' });
+    svg('clock', 84 - L.card.x, 40.2, content);
+    text(task.time, 101.3 - L.card.x, 51.2, 12.5, 500, K.time, content);
+    var chk = el('div', 'check', null, card);
+    el('div', 'ring', null, chk);
+    var fill = el('div', 'fill', null, chk);
+    svg('tick', 0, 0, fill);
+    chk.addEventListener('click', function (ev) { ev.stopPropagation(); tap(task.id); });
+    return { card: card, content: content, ring: chk.querySelector('.ring'), fill: fill };
+  });
+
+  // ---- tab bar + FAB ----
+  var tb = L.tabbar;
+  var bar = el('div', 'abs', { left: tb.x, top: tb.y, width: tb.w, height: tb.h, borderRadius: tb.h / 2,
+    background: 'linear-gradient(180deg, #F1F1F1, #F5F5F5)', boxShadow: 'inset 0 1px 0 #FFFFFF, 0 6px 18px rgba(0,0,0,0.05), 0 0 0 0.5px rgba(0,0,0,0.04)' });
+  el('div', 'abs', { left: tb.centers[1] - tb.sel.w / 2 - tb.x, top: (tb.h - tb.sel.h) / 2, width: tb.sel.w, height: tb.sel.h, borderRadius: tb.sel.h / 2, background: K.tabSel }, bar);
+  [['home', 'Home'], ['tasks', 'Tasks'], ['calendarTab', 'Calendar'], ['stats', 'Stats']].forEach(function (t, i) {
+    var cx = tb.centers[i] - tb.x, on = i === 1;
+    svg(t[0], cx - 11, tb.iconY - tb.y - 11, bar, on ? '#111111' : K.tabInk);
+    centered(t[1], cx, 817.8 - tb.y, 9.5, 500, on ? '#000' : K.tabLabel, bar);
+  });
+  var fab = el('div', 'abs', { left: L.fab.cx - L.fab.d / 2, top: L.fab.cy - L.fab.d / 2, width: L.fab.d, height: L.fab.d, borderRadius: '50%',
+    background: 'linear-gradient(180deg, ' + K.fabTop + ', ' + K.fabBottom + ' 70%)', boxShadow: '0 8px 20px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.12)' });
+  el('div', 'abs', { left: L.fab.d / 2 - 11.2, top: L.fab.d / 2 - 1.25, width: 22.4, height: 2.5, borderRadius: 2, background: '#FFF' }, fab);
+  el('div', 'abs', { left: L.fab.d / 2 - 1.25, top: L.fab.d / 2 - 11.8, width: 2.5, height: 23.6, borderRadius: 2, background: '#FFF' }, fab);
+
+  // ---- timeline ----
+  var events = [], t0 = performance.now(), demoUntil = 0;
+  function now() { return frozenT != null ? frozenT : performance.now() - t0; }
+  function tap(id) { if (frozenT != null) return; events.push({ t: now(), id: id }); }
+  function playDemo() {
+    t0 = performance.now(); events = C.DEMO.events.map(function (e) { return { t: e.t, id: e.id }; });
+  }
+  function reset() { t0 = performance.now(); events = []; }
+  document.getElementById('replay').onclick = playDemo;
+  document.getElementById('reset').onclick = reset;
+  if (frozenT != null || !q.has('interactive')) playDemo();
+  var loop = q.has('loop');
+
+  function render() {
+    var t = now();
+    if (loop && t > C.DEMO.length + 1200) { playDemo(); t = 0; }
+    var f = C.frame(events, t);
+    f.cards.forEach(function (c, i) {
+      var v = cards[i];
+      v.card.style.transform = 'translateY(' + c.y.toFixed(3) + 'px) scale(' + c.scale.toFixed(4) + ')';
+      v.card.style.zIndex = c.z;
+      v.content.style.opacity = c.content.toFixed(4);
+      v.fill.style.opacity = c.check.toFixed(4);
+      v.ring.style.opacity = (1 - c.check).toFixed(4);
+    });
+    paintRing(todayRing, f.today);
+    window.__taskState = f;
+    if (frozenT == null) requestAnimationFrame(render);
+  }
+
+  function fit() {
+    var s = Math.min((innerHeight - (document.body.classList.contains('capture') ? 24 : 80)) / 852, (innerWidth - 24) / 393, 1.4);
+    document.documentElement.style.setProperty('--scale', s.toFixed(4));
+  }
+  addEventListener('resize', fit); fit();
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Todo Check Strike</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2a5a66; }
+  body { font-family: -apple-system, "SF Pro Text", "SF Pro Display", BlinkMacSystemFont, "Helvetica Neue", sans-serif; -webkit-font-smoothing: antialiased; }
+  #stage { position: absolute; left: 50%; top: 50%; width: 433px; height: 520px; transform-origin: 0 0; }
+  #wall { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; }
+  #shadow { position: absolute; border-radius: 22px; box-shadow: 0 20px 38px rgba(25,8,0,0.62), 0 4px 12px rgba(0,0,0,0.32); }
+  #card {
+    position: absolute; width: 360px; height: 292px; border-radius: 22px; overflow: hidden;
+    background: rgba(3,9,11,0.8);
+    -webkit-backdrop-filter: blur(22px) saturate(1.15); backdrop-filter: blur(22px) saturate(1.15);
+  }
+  #card::after {
+    content: ""; position: absolute; inset: 0; border-radius: 22px; padding: 0.6px; pointer-events: none;
+    background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04) 45%, rgba(255,214,170,0.26));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+  }
+  .abs { position: absolute; }
+  .title { font-size: 15.5px; font-weight: 500; letter-spacing: -0.1px; white-space: nowrap; line-height: 1; }
+  .btn { width: 20px; height: 20px; border-radius: 10px; }
+  .item { font-size: 15px; font-weight: 400; letter-spacing: -0.12px; white-space: nowrap; line-height: 1; cursor: pointer; }
+  .item .t { display: inline-block; }
+  .emoji { position: relative; display: inline-block; vertical-align: -3px; margin-left: 3.6px; width: 16.5px; height: 16.5px; }
+  .emoji img { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .sep { height: 0.45px; }
+  .pill { height: 20px; border-radius: 10px; display: flex; align-items: center; box-sizing: border-box; white-space: nowrap; }
+  .pill span { font-size: 11.2px; font-weight: 500; letter-spacing: -0.05px; line-height: 1; }
+  .hit { position: absolute; left: 0; width: 300px; height: 44px; cursor: pointer; }
+  #overlay { position: absolute; left: 0; top: 0; width: 360px; height: 292px; pointer-events: none; overflow: visible; }
+  #ctrl { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 6px; font: 500 12px -apple-system, sans-serif; z-index: 5; }
+  #ctrl button { border: 0; border-radius: 99px; padding: 6px 12px; background: rgba(0,0,0,0.28); color: rgba(255,255,255,0.85); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); cursor: pointer; }
+  #ctrl button.on { background: rgba(255,255,255,0.85); color: #222; }
+  body.clean #ctrl { display: none; }
+</style>
+<!-- nic:screen-mode: ?screen renders only the app screen, edge to edge (nowincode capture) -->
+<script>if(new URLSearchParams(location.search).has('screen'))document.documentElement.classList.add('nic-screen')</script>
+<style>html.nic-screen #ctrl{display:none}</style>
+<!-- /nic:screen-mode -->
+</head>
+<body>
+<svg id="wall" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none"></svg>
+<div id="stage">
+  <div id="shadow"></div>
+  <div id="card"></div>
+</div>
+<div id="ctrl"><button id="bAuto" class="on">自动演示</button><button id="bReset">全部重置</button></div>
+<script src="assets/runner_emoji.js"></script>
+<script src="core.js"></script>
+<script>
+(function () {
+  var K = TodoCore, L = K.L, C = K.C, ICON = K.ICON;
+  var NS = 'http://www.w3.org/2000/svg';
+  var q = new URLSearchParams(location.search);
+  var FROZEN = q.has('t') ? parseFloat(q.get('t')) : null;
+  if (q.has('clean') || FROZEN != null) document.body.classList.add('clean');
+
+  function svgEl(tag, attrs, parent) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function div(cls, css, parent, html) {
+    var e = document.createElement('div');
+    if (cls) e.className = cls;
+    for (var k in css) e.style[k] = typeof css[k] === 'number' ? css[k] + 'px' : css[k];
+    if (html != null) e.innerHTML = html;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  // ---------- 壁纸 ----------
+  var W = K.wallpaper(), wall = document.getElementById('wall');
+  var defs = svgEl('defs', {}, wall);
+  W.defs.forEach(function (g) {
+    var el = g.type === 'linear'
+      ? svgEl('linearGradient', { id: 'w_' + g.id, gradientUnits: 'userSpaceOnUse', x1: g.x1, y1: g.y1, x2: g.x2, y2: g.y2 }, defs)
+      : svgEl('radialGradient', { id: 'w_' + g.id, gradientUnits: 'userSpaceOnUse', cx: g.cx, cy: g.cy, r: g.r }, defs);
+    if (g.tf) el.setAttribute('gradientTransform', g.tf);
+    g.stops.forEach(function (s) { svgEl('stop', { offset: s[0], 'stop-color': s[1], 'stop-opacity': s[2] == null ? 1 : s[2] }, el); });
+  });
+  W.shapes.forEach(function (s) {
+    var a = { fill: 'url(#w_' + s.fill + ')' };
+    if (s.rotate) a.transform = 'rotate(' + s.rotate.join(' ') + ')';
+    if (s.type === 'rect') { a.x = s.x; a.y = s.y; a.width = s.w; a.height = s.h; svgEl('rect', a, wall); }
+    else { a.cx = s.cx; a.cy = s.cy; a.rx = s.rx; a.ry = s.ry; svgEl('ellipse', a, wall); }
+  });
+  var gg = svgEl('g', { stroke: W.gridColor, 'stroke-width': W.gridWidth }, wall);
+  W.grid.forEach(function (l) { svgEl('line', l, gg); });
+
+  // ---------- 卡片 ----------
+  var card = document.getElementById('card'), shadow = document.getElementById('shadow');
+  var cx = K.CARD_IN_WALL.x, cy = K.CARD_IN_WALL.y;
+  [card, shadow].forEach(function (e) { e.style.left = cx + 'px'; e.style.top = cy + 'px'; e.style.width = L.cardW + 'px'; e.style.height = L.cardH + 'px'; });
+
+  // 标题与条目文字都按基线定位（见 placeBaseline）
+  var title = div('title abs', { left: L.titleX, top: 0, color: K.rgba(C.title) }, card, 'This week');
+  var plus = div('btn abs', { left: L.plusCx - 10, top: L.plusCy - 10, background: K.rgba(C.btnBg) }, card);
+  plus.innerHTML = '<svg width="20" height="20" viewBox="-10 -10 20 20"><path d="M-' + ICON.plusArm + ',0H' + ICON.plusArm + 'M0,-' + ICON.plusArm + 'V' + ICON.plusArm + '" stroke="' + K.rgba(C.plus) + '" stroke-width="' + ICON.plusStroke + '" stroke-linecap="round"/></svg>';
+
+  var rows = K.ITEMS.map(function (item, i) {
+    var y = L.rowY(i);
+    var r = {};
+    if (i > 0) div('sep abs', { left: L.sepX0, top: y - L.rowPitch / 2 - 0.22, width: L.sepX1 - L.sepX0, background: K.rgba(C.sep) }, card);
+    r.text = div('item abs', { left: L.textX, top: 0 }, card);
+    r.t = document.createElement('span'); r.t.className = 't'; r.t.textContent = item.title; r.text.appendChild(r.t);
+    if (item.emoji) {
+      var em = document.createElement('span'); em.className = 'emoji';
+      em.innerHTML = '<img alt="" src="data:image/svg+xml;utf8,' + encodeURIComponent(RunnerEmoji.color) + '"><img alt="" src="data:image/svg+xml;utf8,' + encodeURIComponent(RunnerEmoji.gray) + '">';
+      r.t.appendChild(em); r.emC = em.children[0]; r.emG = em.children[1];
+    }
+    var right = L.pillRight;
+    if (item.flag) {
+      r.flag = div('btn abs', { left: L.plusCx - 10, top: y - 10 }, card);
+      r.flag.innerHTML = '<svg width="20" height="20" viewBox="-10 -10 20 20"><path transform="translate(-3.35,-4.2)" d="' + ICON.flag + '"/></svg>';
+      r.flagPath = r.flag.querySelector('path');
+      right = L.pillRightWithFlag;
+    }
+    if (item.pill) {
+      r.pill = div('pill abs', { top: y - L.pillH / 2, paddingLeft: L.pillPadL, paddingRight: L.pillPadR }, card);
+      var cr = ICON.calRect;
+      r.pill.innerHTML = '<svg width="' + L.pillIcon + '" height="8" viewBox="0 0 7.6 8" style="margin-right:' + L.pillGap + 'px;overflow:visible;flex:none">' +
+        '<rect x="' + cr.x + '" y="' + cr.y + '" width="' + cr.w + '" height="' + cr.h + '" rx="' + cr.r + '" fill="none" stroke-width="' + ICON.calStroke + '"/>' +
+        '<path d="M' + cr.x + ',' + ICON.calHeaderY + 'H' + (cr.x + cr.w) + ICON.calTicks.map(function (x) { return 'M' + x + ',' + ICON.calTickY[0] + 'V' + ICON.calTickY[1]; }).join('') + '" stroke-width="' + ICON.calStroke + '" stroke-linecap="round"/></svg>' +
+        '<span>' + item.pill.label + '</span>';
+      r.pillSvg = r.pill.querySelector('svg'); r.pillSpan = r.pill.querySelector('span');
+      r.pillRight = right;
+    }
+    var hit = div('hit', { top: y - 22 }, card);
+    hit.addEventListener('click', function () { toggle(i); });
+    return r;
+  });
+
+  // 文字按基线放置：先渲染再用实测 ascent 校正（与 RN 同一规则：基线 = 行中心 + textBaselineOff）
+  function placeBaseline(el, baseline) {
+    el.style.top = '0px';
+    var probe = document.createElement('span');
+    probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+    el.appendChild(probe);
+    var off = probe.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    el.removeChild(probe);
+    el.style.top = (baseline - off / zoom) + 'px';
+  }
+
+  var overlay = svgEl('svg', { id: 'overlay', width: L.cardW, height: L.cardH }, card);
+  rows.forEach(function (r, i) {
+    var y = L.rowY(i);
+    r.strike = svgEl('line', { y1: y, y2: y, stroke: K.rgba(C.blue), 'stroke-width': L.strikeW, 'stroke-linecap': 'round' }, overlay);
+    r.g = svgEl('g', { transform: 'translate(' + L.boxCx + ',' + y + ')' }, overlay);
+    r.box = svgEl('path', { 'stroke-width': L.boxStroke, 'stroke-linejoin': 'round' }, r.g);
+    r.check = svgEl('path', { fill: 'none', 'stroke-width': K.CHECK_W, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, r.g);
+  });
+
+  // ---------- 舞台缩放 ----------
+  var stage = document.getElementById('stage'), zoom = 1;
+  function fit() {
+    var vw = innerWidth, vh = innerHeight;
+    zoom = K.stageZoom(vw, vh);
+    stage.style.transform = 'scale(' + zoom + ') translate(-216.5px,-260px)';
+    wall.setAttribute('viewBox', K.wallViewBox(vw, vh, zoom).join(' '));
+    placeBaseline(title, L.titleBaseline);
+    rows.forEach(function (r, i) { placeBaseline(r.text, L.rowY(i) + L.textBaselineOff); });
+    measure();
+  }
+  var strikeLens = null;
+  var LENS_TABLE = q.get('lens') === 'table';
+  function measure() {
+    strikeLens = LENS_TABLE ? null : rows.map(function (r) { return r.t.getBoundingClientRect().width / zoom + L.strikePad + L.strikePadR; });
+    rows.forEach(function (r) {
+      if (!r.pill) return;
+      var w = r.pill.getBoundingClientRect().width / zoom;
+      r.pill.style.left = (r.pillRight - w) + 'px';
+    });
+  }
+
+  // ---------- 状态与渲染 ----------
+  var auto = true, clock0 = performance.now() / 1000;
+  var manual = K.ITEMS.map(function () { return { checked: false, at: -10 }; });
+  function now() { return performance.now() / 1000 - clock0; }
+  function states(t) {
+    if (auto) { var tt = K.demoTime(t); return { rs: K.ITEMS.map(function (_, i) { return K.demoState(i, tt); }), t: tt }; }
+    return { rs: manual, t: t };
+  }
+  function toggle(i) {
+    var t = now();
+    if (auto) { // 从当前演示状态接管
+      var s = states(t); manual = s.rs.map(function (r) { return { checked: r.checked, at: r.at - s.t + t }; });
+      setAuto(false);
+    }
+    manual[i] = { checked: !manual[i].checked, at: t };
+  }
+  function setAuto(on) { auto = on; document.getElementById('bAuto').classList.toggle('on', on); if (on) clock0 = performance.now() / 1000; }
+  document.getElementById('bAuto').onclick = function () { setAuto(!auto); };
+  document.getElementById('bReset').onclick = function () { setAuto(false); var t = now(); manual = manual.map(function (m) { return m.checked ? { checked: false, at: t } : m; }); };
+
+  function render(t) {
+    var s = states(t);
+    var F = K.frame(s.rs, s.t, strikeLens);
+    F.forEach(function (f, i) {
+      var r = rows[i], item = K.ITEMS[i];
+      r.box.setAttribute('d', f.box);
+      r.box.setAttribute('fill', f.fill);
+      r.box.setAttribute('stroke', f.ring);
+      if (f.check) { r.check.setAttribute('d', f.check); r.check.setAttribute('stroke', f.checkColor); r.check.style.display = ''; }
+      else r.check.style.display = 'none';
+      if (f.strike) { r.strike.setAttribute('x1', f.strike[0]); r.strike.setAttribute('x2', f.strike[1]); r.strike.style.display = ''; }
+      else r.strike.style.display = 'none';
+      r.text.style.color = f.colors.text;
+      if (r.emC) { r.emC.style.opacity = f.colors.emojiColor; r.emG.style.opacity = f.colors.emojiGray; }
+      if (r.flag) { r.flag.style.background = f.colors.flagBg; r.flagPath.setAttribute('fill', f.colors.flagFg); }
+      if (r.pill) { r.pill.style.background = f.colors.pillBg; r.pillSpan.style.color = f.colors.pillFg; r.pillSvg.setAttribute('stroke', f.colors.pillFg); }
+    });
+    window.__frame = F;
+  }
+
+  fit();
+  addEventListener('resize', fit);
+  window.__render = function (t) { render(t); };
+  if (FROZEN != null) { render(FROZEN); document.fonts && document.fonts.ready.then(function () { fit(); render(FROZEN); window.__ready = true; }); }
+  else {
+    document.fonts && document.fonts.ready.then(fit);
+    (function loop() { render(now()); requestAnimationFrame(loop); })();
+  }
+})();
+</script>
+</body>
+</html>

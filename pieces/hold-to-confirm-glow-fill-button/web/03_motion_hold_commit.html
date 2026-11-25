@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hold to Commit</title>
+<style>
+  :root { --page: #0a0a0b; --ink: #e9e9ec; --dim: #8b8b92; --chip: #1b1b1f; --chipOn: #f1f1f3; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--page); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif; overflow: hidden; }
+  #stage { position: absolute; left: 50%; top: 50%; width: 426px; height: 898px; transform-origin: 50% 50%; }
+  /* static upright device frame */
+  #device { position: absolute; inset: 0; border-radius: 68px; padding: 12px;
+    background: linear-gradient(145deg, #3a3a3e, #17171a 30%, #2a2a2e 55%, #121214 80%, #333337);
+    box-shadow: 0 0 0 1px #4a4a50 inset, 0 30px 80px rgba(0,0,0,.6); }
+  #screen { position: relative; width: 402px; height: 874px; border-radius: 56px; overflow: hidden; background: #000; }
+  #island { position: absolute; left: 50%; top: 11px; width: 124px; height: 36px; margin-left: -62px; border-radius: 18px; background: #000; box-shadow: 0 0 0 1px #0d0d0f; }
+  .btn { position: absolute; width: 337px; height: 48px; transform-origin: 50% 50%; touch-action: none; cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .btn canvas { position: absolute; inset: 0; width: 337px; height: 48px; }
+  .lab { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none;
+    font-size: 17px; font-weight: 500; letter-spacing: -0.4px; white-space: nowrap; }
+  .lab svg { width: 15px; height: 15px; margin-right: 8px; overflow: visible; }
+  #fx { position: absolute; left: 0; top: 0; width: 402px; height: 874px; pointer-events: none; }
+  #ui { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  #ui button { font: inherit; border: 0; border-radius: 999px; padding: 7px 14px; background: var(--chip); color: var(--ink); cursor: pointer; }
+  #ui button.on { background: var(--chipOn); color: #111; }
+  #hint { color: var(--dim); margin-left: 6px; }
+  body.frozen #ui { display: none; }
+</style>
+<!-- nic:screen-mode: ?screen renders only the app screen, edge to edge (nowincode capture) -->
+<script>if(new URLSearchParams(location.search).has('screen'))document.documentElement.classList.add('nic-screen')</script>
+<style>html.nic-screen #stage{left:0;top:0;width:402px;height:874px;transform-origin:0 0;transform:scale(.97761)!important}html.nic-screen #device{padding:0;border-radius:0;background:none;box-shadow:none}html.nic-screen #screen{border-radius:0}html.nic-screen #island,html.nic-screen #ui{display:none!important}</style>
+<!-- /nic:screen-mode -->
+</head>
+<body>
+<div id="stage">
+  <div id="device"><div id="screen">
+    <div id="island"></div>
+    <div class="btn" id="b-commit"><canvas></canvas><div class="lab"></div><div class="lab"></div></div>
+    <div class="btn" id="b-delete"><canvas></canvas><div class="lab"></div><div class="lab"></div></div>
+    <canvas id="fx"></canvas>
+  </div></div>
+</div>
+<div id="ui">
+  <button id="mDemo" class="on">Demo loop</button>
+  <button id="mLive">Try it</button>
+  <span id="hint">press and hold either button</span>
+</div>
+<script src="shared/hold_core.js"></script>
+<script>
+const C = window.HoldCore, L = C.L;
+const qs = new URLSearchParams(location.search);
+const FROZEN = qs.has('t') ? parseFloat(qs.get('t')) : null;
+if (FROZEN != null) document.body.classList.add('frozen');
+
+// ---------- fit stage ----------
+let stageScale = 1;
+function fit() {
+  stageScale = qs.has('s') ? parseFloat(qs.get('s')) : Math.min(innerWidth / 470, (innerHeight - (FROZEN != null ? 20 : 80)) / 920);
+  const st = document.getElementById('stage');
+  st.style.transform = `translate(-50%, ${FROZEN != null ? '-50%' : 'calc(-50% - 24px)'}) scale(${stageScale})`;
+  sizeCanvases();
+}
+
+// ---------- GL per button ----------
+const VS = 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }';
+const views = {};
+for (const kind of ['commit', 'delete']) {
+  const el = document.getElementById('b-' + kind), cv = el.querySelector('canvas');
+  const gl = cv.getContext('webgl', { premultipliedAlpha: true, alpha: true, antialias: false, preserveDrawingBuffer: true });
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s)); return s; };
+  const pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, C.SHADER_GLSL)); gl.linkProgram(pr);
+  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(pr));
+  gl.useProgram(pr);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(pr, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const U = {}; for (const n of ['uResY', 'uSize', 'uPx', 'uF', 'uFill', 'uDone', 'uBase', 'uLobeA', 'uLobeB', 'uRamp']) U[n] = gl.getUniformLocation(pr, n);
+  const pos = C.layout()[kind];
+  el.style.left = pos.x + 'px'; el.style.top = pos.y + 'px';
+  views[kind] = { el, cv, gl, U, labs: [...el.querySelectorAll('.lab')], px: 1 };
+}
+const fx = document.getElementById('fx'), fctx = fx.getContext('2d');
+function sizeCanvases() {
+  const px = Math.min(4, (devicePixelRatio || 1) * stageScale);
+  for (const v of Object.values(views)) { v.px = px; v.cv.width = Math.round(L.W * px); v.cv.height = Math.round(L.H * px); }
+  fx.width = Math.round(L.SCREEN_W * px); fx.height = Math.round(L.SCREEN_H * px); fx._px = px;
+}
+function drawButton(v, bf) {
+  const gl = v.gl, U = v.U, u = C.uniforms(bf, v.px);
+  gl.viewport(0, 0, v.cv.width, v.cv.height);
+  gl.uniform1f(U.uResY, v.cv.height); gl.uniform2fv(U.uSize, u.uSize); gl.uniform1f(U.uPx, v.cv.width / L.W);
+  gl.uniform1f(U.uF, u.uF); gl.uniform1f(U.uFill, u.uFill); gl.uniform1f(U.uDone, u.uDone);
+  gl.uniform3fv(U.uBase, u.uBase); gl.uniform3fv(U.uLobeA, u.uLobeA); gl.uniform3fv(U.uLobeB, u.uLobeB);
+  gl.uniform3fv(U.uRamp, new Float32Array(u.uRamp.flat()));
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  v.el.style.transform = `scale(${bf.scale})`;
+  (window.__lastUniforms = window.__lastUniforms || {})[bf.kind] = { ...u, uPx: v.cv.width / L.W, w: v.cv.width, h: v.cv.height };
+  const CHECK = `<svg viewBox="0 0 15 15"><path d="${L.CHECK_PATH}" fill="none" stroke="currentColor" stroke-width="${L.CHECK_STROKE}" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  v.labs.forEach((el, i) => {
+    const l = bf.labels[i];
+    if (!l) { el.style.opacity = 0; return; }
+    const html = (l.check ? CHECK : '') + '<span>' + l.text + '</span>';
+    if (el._html !== html) { el.innerHTML = html; el._html = html; }
+    el.style.opacity = l.a.toFixed(4); el.style.color = l.color;
+    el.style.filter = l.b > 0.05 ? `blur(${(l.b * 0.5).toFixed(2)}px)` : 'none';
+  });
+}
+function drawFx(f) {
+  const px = fx._px; fctx.setTransform(px, 0, 0, px, 0, 0); fctx.clearRect(0, 0, L.SCREEN_W, L.SCREEN_H);
+  const drawn = window.__fxDrawn = [];
+  for (const kind of ['commit', 'delete']) {
+    const bf = f[kind], o = f.layout[kind];
+    // particles are in pill-local unscaled coords for sparks (move with the scaled pill), burst already scaled
+    const sx = (x) => o.x + L.W / 2 + (x - L.W / 2) * bf.scale, sy = (y) => o.y + L.H / 2 + (y - L.H / 2) * bf.scale;
+    for (const p of bf.sparks) { fctx.globalAlpha = p.a; fctx.fillStyle = '#ffffff'; fctx.beginPath(); fctx.arc(sx(p.x), sy(p.y), p.r, 0, 6.2832); fctx.fill(); drawn.push([kind, sx(p.x), sy(p.y), p.r, p.a, '#ffffff']); }
+    for (const p of bf.burst) { fctx.globalAlpha = p.a; fctx.fillStyle = p.col; fctx.beginPath(); fctx.arc(o.x + p.x, o.y + p.y, p.r, 0, 6.2832); fctx.fill(); drawn.push([kind, o.x + p.x, o.y + p.y, p.r, p.a, p.col]); }
+  }
+  fctx.globalAlpha = 1;
+}
+function render(f) { drawButton(views.commit, f.commit); drawButton(views.delete, f.delete); drawFx(f); window.__frame = f; }
+
+// ---------- modes ----------
+let mode = 'demo', t0 = performance.now(), live = [], resetTimers = {};
+const now = () => performance.now() - t0;
+function setMode(m) {
+  mode = m; t0 = performance.now(); live = [];
+  document.getElementById('mDemo').classList.toggle('on', m === 'demo');
+  document.getElementById('mLive').classList.toggle('on', m === 'live');
+}
+document.getElementById('mDemo').onclick = () => setMode('demo');
+document.getElementById('mLive').onclick = () => setMode('live');
+for (const kind of ['commit', 'delete']) {
+  const el = views[kind].el;
+  el.addEventListener('pointerdown', (e) => {
+    if (FROZEN != null) return;
+    if (mode !== 'live') setMode('live');
+    el.setPointerCapture(e.pointerId);
+    const f = window.__frame && window.__frame[kind];
+    if (f && f.phase === 'done') { live.push({ t: now(), type: 'reset', id: kind }); return; }
+    live.push({ t: now(), type: 'down', id: kind });
+  });
+  const up = () => { if (mode === 'live') live.push({ t: now(), type: 'up', id: kind }); };
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+}
+function tick() {
+  const t = now();
+  if (mode === 'demo') render(C.frame(C.demoEvents(t), t));
+  else {
+    const f = C.frame(live, t);
+    // auto-reset 1.6s after completion so it can be tried again
+    for (const kind of ['commit', 'delete']) if (f[kind].completedAt != null && t - f[kind].completedAt > 1600 && !live.some((e) => e.id === kind && e.type === 'reset' && e.t > f[kind].completedAt)) live.push({ t, type: 'reset', id: kind });
+    render(f);
+  }
+  requestAnimationFrame(tick);
+}
+addEventListener('resize', fit); fit();
+if (FROZEN != null) render(C.frame(C.demoEvents(FROZEN), FROZEN));
+else requestAnimationFrame(tick);
+</script>
+</body>
+</html>

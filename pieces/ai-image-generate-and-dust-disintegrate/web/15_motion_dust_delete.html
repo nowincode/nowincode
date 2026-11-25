@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dust Delete</title>
+<style>
+  @font-face { font-family: 'InterLocal'; src: url('assets/fonts/Inter-400.ttf') format('truetype'); font-weight: 400; }
+  @font-face { font-family: 'InterLocal'; src: url('assets/fonts/Inter-500.ttf') format('truetype'); font-weight: 500; }
+  html, body { margin: 0; height: 100%; background: #141414; overflow: hidden; }
+  body {
+    background-image: radial-gradient(circle at 1px 1px, #1c1c1c 1px, transparent 1.2px);
+    background-size: var(--pitch, 24px) var(--pitch, 24px);
+    font-family: 'InterLocal', system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  #wrap { position: absolute; left: 50%; top: 50%; transform-origin: 50% 50%; }
+  #gl { position: absolute; pointer-events: none; }
+  #ui { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+  #hit { position: absolute; left: 0; top: 0; width: 100%; height: 100%; cursor: default; }
+  #bar { position: fixed; left: 0; right: 0; bottom: 18px; display: flex; gap: 8px; justify-content: center; font: 500 12px/1 'InterLocal', system-ui; }
+  #bar button { background: #222; color: #bbb; border: 1px solid #2c2c2c; border-radius: 999px; padding: 8px 14px; font: inherit; cursor: pointer; }
+  #bar button.on { color: #fff; border-color: #555; }
+  #hint { position: fixed; left: 0; right: 0; top: 16px; text-align: center; color: #555; font: 400 12px/1.4 'InterLocal', system-ui; }
+  body.hold #bar, body.hold #hint { display: none; }
+</style>
+<!-- nic:screen-mode: ?screen renders only the app screen, edge to edge (nowincode capture) -->
+<script>if(new URLSearchParams(location.search).has('screen')){document.documentElement.classList.add('nic-screen');document.addEventListener('DOMContentLoaded',function(){var d=document.createElement('div');d.id='nic-bg';document.body.prepend(d)})}</script>
+<style>html.nic-screen #nic-bg{position:fixed;inset:0}</style>
+<style>html.nic-screen #bar,html.nic-screen #hint{display:none!important}</style>
+<!-- /nic:screen-mode -->
+</head>
+<body>
+<div id="hint">Hover the image for actions · trash = dust delete · ↻ = generate again</div>
+<div id="wrap">
+  <canvas id="gl"></canvas>
+  <svg id="ui" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="shim" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1" y2="0"></linearGradient>
+    </defs>
+    <g id="ringG">
+      <circle id="track" fill="none" stroke="#fff" />
+      <path id="arc" fill="none" stroke="#fff" stroke-linecap="round" />
+      <text id="pct" text-anchor="middle" fill="#fff"></text>
+      <text id="labP" text-anchor="middle" fill="url(#shim)">Processing...</text>
+      <text id="labG" text-anchor="middle" fill="url(#shim)">Generating...</text>
+    </g>
+    <g id="icons"></g>
+  </svg>
+  <div id="hit"></div>
+</div>
+<div id="bar">
+  <button id="bDemo" class="on">Auto demo</button>
+  <button id="bReplay">Replay</button>
+  <button id="bSlow">0.25×</button>
+</div>
+<script src="src/dustCore.js"></script>
+<script>
+(function () {
+  const C = window.DustCore;
+  const Q = new URLSearchParams(location.search);
+  const HOLD = Q.has('t');
+  if (HOLD) document.body.classList.add('hold');
+  const W = C.CARD.w, H = C.CARD.h;
+
+  // ── layout: k = css px per unit
+  let k = 1;
+  const wrap = document.getElementById('wrap'), cv = document.getElementById('gl'), ui = document.getElementById('ui');
+  function layout() {
+    k = Math.min(1.25, (innerHeight * 0.66) / H, (innerWidth - 40) / W);
+    if (Q.has('k')) k = +Q.get('k');
+    wrap.style.width = W * k + 'px'; wrap.style.height = H * k + 'px';
+    wrap.style.marginLeft = (-W * k / 2) + 'px'; wrap.style.marginTop = (-H * k / 2 + (HOLD ? 0 : 10)) + 'px';
+    document.body.style.setProperty('--pitch', (C.STAGE.pitch * k) + 'px');
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    cv.style.left = (-C.PAD.x * k) + 'px'; cv.style.top = (-C.PAD.top * k) + 'px';
+    cv.style.width = C.CANVAS.w * k + 'px'; cv.style.height = C.CANVAS.h * k + 'px';
+    cv.width = Math.round(C.CANVAS.w * k * dpr); cv.height = Math.round(C.CANVAS.h * k * dpr);
+    ui.setAttribute('width', W * k); ui.setAttribute('height', H * k); ui.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  }
+  layout();
+
+  // ── static SVG setup
+  const R = C.RING, TX = C.TEXT;
+  const $ = (id) => document.getElementById(id);
+  $('track').setAttribute('cx', R.cx); $('track').setAttribute('cy', R.cy); $('track').setAttribute('r', R.r);
+  $('track').setAttribute('stroke-width', R.stroke); $('track').setAttribute('stroke-opacity', R.track);
+  $('arc').setAttribute('stroke-width', R.stroke);
+  const pctEl = $('pct'), labP = $('labP'), labG = $('labG');
+  pctEl.setAttribute('x', R.cx); pctEl.setAttribute('y', TX.pct.baseline);
+  pctEl.setAttribute('font-size', TX.pct.size); pctEl.setAttribute('font-weight', TX.pct.weight);
+  for (const el of [labP, labG]) {
+    el.setAttribute('x', W / 2); el.setAttribute('y', TX.label.baseline);
+    el.setAttribute('font-size', TX.label.size); el.setAttribute('font-weight', TX.label.weight);
+  }
+  const grad = $('shim');
+  const stops = C.shimmerStops();
+  grad.innerHTML = stops.map(() => '<stop stop-color="#fff"/>').join('');
+  const NS = 'http://www.w3.org/2000/svg';
+  const iconG = $('icons'), iconEls = [];
+  C.ICON_ORDER.forEach((name) => {
+    const def = C.ICONS[name], g = document.createElementNS(NS, 'g');
+    (def.fill || []).forEach((d) => { const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d); p.setAttribute('fill', '#fff'); g.appendChild(p); });
+    (def.stroke || []).forEach((d) => {
+      const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d); p.setAttribute('fill', 'none'); p.setAttribute('stroke', '#fff');
+      p.setAttribute('stroke-width', C.MENU.stroke); p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round'); g.appendChild(p);
+      if (name === 'heart') g._heart = p;
+    });
+    (def.cut || []).forEach((d) => {
+      const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d); p.setAttribute('fill', 'none'); p.setAttribute('stroke', 'rgba(60,60,60,0.85)');
+      p.setAttribute('stroke-width', 1.6); p.setAttribute('stroke-linecap', 'round'); g.appendChild(p);
+    });
+    iconG.appendChild(g); iconEls.push(g);
+  });
+
+  // ── WebGL
+  const gl = cv.getContext('webgl', { premultipliedAlpha: true, alpha: true, antialias: false, preserveDrawingBuffer: true });
+  function sh(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+  function prog(vs, fs) { const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p; }
+  const P1 = prog('attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }', C.shaderSource('glsl'));
+  const P2 = prog(`precision highp float;
+    attribute vec4 aP; attribute vec3 aC; uniform vec2 uRes; uniform float uScale; uniform vec2 uPad; varying vec4 vC;
+    void main(){ vec2 px = (aP.xy + uPad) * uScale; gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
+      gl_PointSize = aP.z * uScale; vC = vec4(aC * aP.w, aP.w); if (aP.z <= 0.0) gl_Position = vec4(2.0, 2.0, 0.0, 1.0); }`,
+    'precision mediump float; varying vec4 vC; void main(){ gl_FragColor = vC; }');
+  const quad = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, quad); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  const pBuf = gl.createBuffer(), cBuf = gl.createBuffer();
+  const parts = new Float32Array(C.NP * 4);
+  const U1 = {}; ['uRes', 'uScale', 'tPhoto', 'tBlur', 'uPx', 'uCard', 'uAur', 'uMenu', 'uHover', 'uWob'].forEach((n) => U1[n] = gl.getUniformLocation(P1, n));
+  const U2 = {}; ['uRes', 'uScale', 'uPad'].forEach((n) => U2[n] = gl.getUniformLocation(P2, n));
+  function tex(img, unit) {
+    const t = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  }
+  const load = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+
+  // ── controller / time
+  let speed = 1, last = performance.now(), clock = 0;
+  const ctl = new C.Controller(0, true);
+  let st = null;
+
+  function render(t, ev) {
+    st = C.frame(t, ev);
+    const u = C.uniforms(st, cv.width / (C.CANVAS.w));
+    // wrap transform: entrance scale + hover lift
+    const sc = st.cardScale * (1 + 0.012 * st.lift);
+    wrap.style.transform = `translateY(${-3.5 * st.lift * k}px) scale(${sc})`;
+    // GL
+    gl.viewport(0, 0, cv.width, cv.height); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(P1);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quad); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(U1.uRes, cv.width, cv.height); gl.uniform1f(U1.uScale, cv.width / C.CANVAS.w);
+    gl.uniform1i(U1.tPhoto, 0); gl.uniform1i(U1.tBlur, 1);
+    gl.uniform1f(U1.uPx, u.uPx); gl.uniform4fv(U1.uCard, [st.cardOpacity * u.uCard[0], u.uCard[1], u.uCard[2], 0]);
+    gl.uniform4fv(U1.uAur, u.uAur); gl.uniform4fv(U1.uMenu, u.uMenu); gl.uniform4fv(U1.uHover, u.uHover); gl.uniform1fv(U1.uWob, u.uWob);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.disableVertexAttribArray(0);
+    if (st.dust >= 0 && !st.gone) {
+      C.dust(st.dust, parts, C.CANVAS.w / cv.width);
+      gl.useProgram(P2);
+      const aP = gl.getAttribLocation(P2, 'aP'), aC = gl.getAttribLocation(P2, 'aC');
+      gl.bindBuffer(gl.ARRAY_BUFFER, pBuf); gl.bufferData(gl.ARRAY_BUFFER, parts, gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(aP); gl.vertexAttribPointer(aP, 4, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, cBuf); gl.enableVertexAttribArray(aC); gl.vertexAttribPointer(aC, 3, gl.FLOAT, false, 0, 0);
+      gl.uniform2f(U2.uRes, cv.width, cv.height); gl.uniform1f(U2.uScale, cv.width / C.CANVAS.w); gl.uniform2f(U2.uPad, C.PAD.x, C.PAD.top);
+      gl.drawArrays(gl.POINTS, 0, C.NP);
+      gl.disableVertexAttribArray(aP); gl.disableVertexAttribArray(aC);
+    }
+    // SVG overlay
+    const uiA = st.ui * st.cardOpacity;
+    $('ringG').setAttribute('opacity', uiA.toFixed(4));
+    $('arc').setAttribute('d', C.arcPath(st.arc));
+    pctEl.textContent = st.pct + '%';
+    labP.setAttribute('opacity', st.labelP.toFixed(4)); labG.setAttribute('opacity', st.labelG.toFixed(4));
+    grad.setAttribute('x1', st.shimmer - 2 * TX.label.band); grad.setAttribute('x2', st.shimmer + 2 * TX.label.band);
+    Array.from(grad.children).forEach((s, i) => { s.setAttribute('offset', (i / (stops.length - 1)).toFixed(4)); s.setAttribute('stop-opacity', stops[i][1].toFixed(4)); });
+    // icons
+    const cs = C.menuCircles(st);
+    iconEls.forEach((g, i) => {
+      const s = (cs[i].r / C.MENU.r) * (C.MENU.icon / 24);
+      g.setAttribute('transform', `translate(${cs[i].x - 12 * s} ${cs[i].y - 12 * s}) scale(${s})`);
+      g.setAttribute('opacity', (st.menu.fill * st.cardOpacity).toFixed(4));
+      if (g._heart) g._heart.setAttribute('fill', st.liked ? '#fff' : 'none');
+    });
+  }
+
+  function loop(now) {
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    clock += dt * speed;
+    const ev = ctl.tick(clock);
+    render(clock, ev);
+    requestAnimationFrame(loop);
+  }
+
+  // ── interaction
+  const hit = $('hit');
+  const local = (e) => { const r = wrap.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H]; };
+  hit.addEventListener('pointerenter', () => { ctl.enter(clock); markDemo(); });
+  hit.addEventListener('pointerleave', () => { ctl.leave(clock); });
+  hit.addEventListener('pointermove', (e) => {
+    if (!st) return; const [x, y] = local(e); const b = C.hitButton(st, x, y);
+    for (let i = 0; i < 4; i++) ctl.hoverBtn(i, i === b, clock);
+    hit.style.cursor = b >= 0 ? 'pointer' : 'default';
+    if (e.pointerType !== 'mouse') ctl.enter(clock);
+  });
+  hit.addEventListener('pointerdown', (e) => {
+    if (!st) return; const [x, y] = local(e); const b = C.hitButton(st, x, y);
+    if (b < 0) { ctl.enter(clock); markDemo(); return; }
+    const what = ctl.press(b, clock); markDemo();
+    if (what === 'download') { const a = document.createElement('a'); a.href = 'assets/photo.jpg'; a.download = 'generated.jpg'; a.click(); }
+  });
+  function markDemo() { $('bDemo').classList.toggle('on', ctl.auto); }
+  $('bDemo').onclick = () => { ctl.auto = !ctl.auto; ctl.reset(clock); markDemo(); };
+  $('bReplay').onclick = () => { ctl.reset(clock); };
+  $('bSlow').onclick = () => { speed = speed === 1 ? 0.25 : 1; $('bSlow').classList.toggle('on', speed !== 1); };
+  addEventListener('resize', () => { layout(); });
+
+  // ── parity / capture hooks
+  window.__frameForCheck = (t) => { const ev = C.demoEvents(0); const s = C.frame(t, ev); return { st: s, u: C.uniforms(s, 1) }; };
+  window.__freezeAt = (t) => { render(t, C.demoEvents(0)); return true; };
+  window.__live = () => ({ clock, auto: ctl.auto, menu: st && st.menu, dust: st && st.dust, reveal: st && st.reveal, liked: st && st.liked });
+
+  Promise.all([load('assets/photo.jpg'), load('assets/photo_blur.png'), load('assets/photo_cells.png'), document.fonts.load('500 20px InterLocal'), document.fonts.load('400 20px InterLocal')])
+    .then(([ph, bl, cells]) => {
+      tex(ph, 0); tex(bl, 1);
+      const c2 = document.createElement('canvas'); c2.width = cells.width; c2.height = cells.height;
+      const x2 = c2.getContext('2d'); x2.drawImage(cells, 0, 0); const px = x2.getImageData(0, 0, cells.width, cells.height).data;
+      const col = new Float32Array(C.NP * 3);
+      for (let n = 0; n < C.NP; n++) { const i = C.CELLS[2 * n], j = C.CELLS[2 * n + 1], o = (j * cells.width + i) * 4; col[3 * n] = px[o] / 255; col[3 * n + 1] = px[o + 1] / 255; col[3 * n + 2] = px[o + 2] / 255; }
+      gl.bindBuffer(gl.ARRAY_BUFFER, cBuf); gl.bufferData(gl.ARRAY_BUFFER, col, gl.STATIC_DRAW);
+      if (HOLD) { window.__freezeAt(+Q.get('t')); document.body.dataset.ready = '1'; }
+      else { clock = Q.has('from') ? +Q.get('from') : 0; requestAnimationFrame((n) => { last = n; loop(n); }); document.body.dataset.ready = '1'; }
+    });
+})();
+</script>
+</body>
+</html>
