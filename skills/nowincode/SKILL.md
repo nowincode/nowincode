@@ -5,7 +5,7 @@ description: Find, inspect, and install React Native (Expo) and plain Web UI/mot
 
 # Now In Code
 
-Now In Code (`https://nowincode.com`) is a library of 204 UI and motion pieces rebuilt from scratch as working **React Native (Expo SDK 54, TypeScript)** and **plain Web (HTML, CSS, JS)** code, with timing and easing constants written at the top of each file.
+Now In Code (`https://nowincode.com`) is a library of 228 UI and motion pieces rebuilt from scratch as working **React Native (Expo SDK 54, TypeScript)** and **plain Web (HTML, CSS, JS)** code, with timing and easing constants written at the top of each file.
 
 ## Workflow
 
@@ -22,7 +22,7 @@ Always verify the exact `<slug>`, dependencies, and whether it is Free or Pro fr
 ### 2. Install a piece with the CLI
 
 ```sh
-# First time only (free account works for the 10 free pieces; Pro/Lifetime unlocks all 204):
+# First time only (free account works for the 10 free pieces; Pro/Lifetime unlocks all 228):
 npx nowincode login
 
 # Install React Native (Expo) source into components/<slug>/:

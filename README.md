@@ -4,7 +4,7 @@
 
 [Now In Code](https://nowincode.com/?utm_source=github) rebuilds the UI and motion designs people save on X, RedNote and Pinterest from scratch as working code in two matched versions: **React Native (Expo)** and **plain web (HTML, CSS, JS)** — built from one shared timing core so the motion matches on a phone and in a browser.
 
-This repository holds all **10 MIT-licensed free pieces** with full source and previews. The full library has **204 pieces** (new ones every Monday): [browse with live previews](https://nowincode.com/library?utm_source=github).
+This repository holds all **10 MIT-licensed free pieces** with full source and previews. The full library has **228 pieces** (new ones every Monday): [browse with live previews](https://nowincode.com/library?utm_source=github).
 
 ## Preview the 10 free pieces
 
@@ -94,7 +94,7 @@ npx nowincode add hold-to-confirm-glow-fill-button
 - Pass `--web` to install the self-contained browser version instead.
 - Or copy any folder directly from `pieces/<slug>/` (no login needed for these 10 MIT pieces).
 
-## Use with a coding agent (Agent Skill)
+## Use with a coding agent (Agent Skill & Remote MCP)
 
 Install the Now In Code skill for Claude Code, Cursor, Codex, Windsurf and other coding agents:
 
@@ -102,7 +102,15 @@ Install the Now In Code skill for Claude Code, Cursor, Codex, Windsurf and other
 npx skills add nowincode/nowincode
 ```
 
-It teaches your agent how to search the catalog via [`llms.txt`](https://nowincode.com/llms.txt), inspect piece specs via `/library/<slug>.md`, and install pieces with `npx nowincode add <slug>`.
+- **Agent Skill**: teaches your agent how to search the catalog via [`llms.txt`](https://nowincode.com/llms.txt), inspect piece specs via `/library/<slug>.md`, and install pieces with `npx nowincode add <slug>`.
+- **Remote MCP**: connect MCP-compatible clients (Claude Code, Cursor, Windsurf, etc.) directly to `https://nowincode.com/mcp` (see [docs](https://nowincode.com/docs?utm_source=github)).
+- **Copyable agent prompts**: paid plans also include structured prompts alongside full source code so coding agents can adapt a piece cleanly into an existing app.
+
+## Stack & compatibility
+
+- **React Native**: built and tested against **Expo SDK 54** (TypeScript), using `react-native-reanimated`, `@shopify/react-native-skia`, and `react-native-gesture-handler` where needed. Every piece is standalone source copied into your repo — no black-box runtime library.
+- **Web**: matching self-contained HTML, CSS, and JS built from the same timing and spring constants, with live interactive browser previews on [nowincode.com](https://nowincode.com/library?utm_source=github).
+- **6 categories (228 pieces total)**: Screens & flows · Onboarding & paywalls · Components · Interactions · Data viz · Effects (shaders, blur, glass & micro-interactions).
 
 ## All 10 free pieces
 
@@ -121,9 +129,19 @@ It teaches your agent how to search the catalog via [`llms.txt`](https://nowinco
 
 Each folder contains `rn/` (React Native, Expo SDK 54), `web/` (self-contained HTML/CSS/JS) and a README.
 
-## Full library (204 pieces)
+## Full library (228 pieces) & pricing
 
-194 more pieces across screens & flows, onboarding & paywalls, components, interactions, data viz and shader effects are available with a [Now In Code plan](https://nowincode.com/pricing?utm_source=github) (Quarterly $45, Yearly $129, or Lifetime $249 launch price). See how Now In Code compares with other React Native motion libraries on [nowincode.com/compare](https://nowincode.com/compare?utm_source=github).
+218 additional pieces are available on [nowincode.com/pricing](https://nowincode.com/pricing?utm_source=github):
+
+| Plan | Price | What's included |
+|---|---|---|
+| **Free** | $0 | All 10 MIT-licensed pieces in this repo (RN + Web source, CLI) |
+| **Quarterly** | $45 / quarter | All 228 pieces + weekly Monday drops + agent prompts + CLI & MCP |
+| **Yearly** | $129 / year | Same full access, billed annually |
+| **Lifetime** | $249 launch price (~~$349~~) | One-time payment, all current and future pieces |
+
+- **Fair licensing**: cancel anytime — every piece you have downloaded stays yours to keep and ship in personal or commercial apps.
+- **Comparisons**: see how Now In Code compares with other React Native motion libraries and design inspiration tools on [nowincode.com/compare](https://nowincode.com/compare?utm_source=github).
 
 ## Credits and removal
 
