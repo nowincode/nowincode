@@ -1,28 +1,32 @@
 ---
 name: nowincode
-description: Find, inspect, and install React Native (Expo) and plain Web UI/motion pieces from Now In Code using the CLI and Markdown catalog. Use when the user asks to add a Now In Code piece, search for an animated RN/Expo or Web UI interaction, paywall, onboarding flow, chart, or shader effect from nowincode.com.
+description: Find, inspect, and install React Native (Expo) and plain Web UI/motion pieces from Now In Code using Remote MCP, CLI, or the Markdown catalog. Use when the user asks to add a Now In Code piece, avoid generic AI UI slop, or build an animated RN/Expo or Web interaction, paywall, onboarding flow, chart, or shader effect.
 ---
 
 # Now In Code
 
-Now In Code (`https://nowincode.com`) is a library of 228 UI and motion pieces rebuilt from scratch as working **React Native (Expo SDK 54, TypeScript)** and **plain Web (HTML, CSS, JS)** code, with timing and easing constants written at the top of each file.
+Now In Code (`https://nowincode.com`) is a growing library of trending UI and motion designs from X and Dribbble, rebuilt from scratch as working **React Native (Expo SDK 54, TypeScript)** and **plain Web (HTML, CSS, JS)** code, with timing and easing constants written at the top of each file.
 
 ## Workflow
 
-### 1. Discover pieces (never guess slugs)
+### Option A: Remote MCP (preferred if connected)
 
-Fetch the machine-readable index first to find exact slugs:
+If the user has connected the Now In Code remote MCP server (`https://nowincode.com/mcp`):
 
-- Full catalog index: `https://nowincode.com/llms.txt`
-- Browse by tag (Markdown): `https://nowincode.com/tags/<tag>.md` (e.g. `bottom-sheet`, `tab-bar`, `spring`, `shader`, `paywall`, `card-stack`)
-- Detailed piece spec (Markdown): `https://nowincode.com/library/<slug>.md`
+1. Call `list_tags` or `search_pieces` (no login required) with keywords, `tag`, `type`, or `form` to find exact slugs.
+2. Call `get_piece` to inspect metadata, tags, and credit.
+3. Call `get_source` with `slug` and `target` (`"rn"`, `"web"`, or `"all"`) to fetch the full watermarked files, npm dependencies, and integration prompt directly into context.
 
-Always verify the exact `<slug>`, dependencies, and whether it is Free or Pro from the Markdown page before installing.
+### Option B: Markdown catalog + CLI (works everywhere)
 
-### 2. Install a piece with the CLI
+1. **Discover exact slugs (never guess)**:
+   - Full index: `https://nowincode.com/llms.txt`
+   - Browse by tag (Markdown): `https://nowincode.com/tags/<tag>.md` (e.g. `bottom-sheet`, `tab-bar`, `spring`, `shader`, `paywall`, `card-stack`)
+   - Piece spec (Markdown): `https://nowincode.com/library/<slug>.md`
+2. **Install with CLI**:
 
 ```sh
-# First time only (free account works for the 10 free pieces; Pro/Lifetime unlocks all 228):
+# First time only (free account works for the 10 free pieces; Pro/Lifetime unlocks the full library):
 npx nowincode login
 
 # Install React Native (Expo) source into components/<slug>/:
@@ -34,7 +38,7 @@ npx nowincode add <slug> --web
 
 After `npx nowincode add <slug>` finishes, run the `npx expo install ...` command it prints if the piece has extra dependencies (such as `@shopify/react-native-skia`, `react-native-reanimated`, `expo-blur`, `expo-haptics`, or `react-native-svg`).
 
-### 3. Adapt to the user's app
+### Adapt to the user's app
 
 - Each piece is standalone source you own (not a runtime package).
 - Check the named timing, spring, and color constants at the top of the file before editing motion or theme tokens.

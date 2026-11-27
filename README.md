@@ -103,8 +103,24 @@ npx skills add nowincode/nowincode
 ```
 
 - **Agent Skill**: teaches your agent how to search the catalog via [`llms.txt`](https://nowincode.com/llms.txt), inspect piece specs via `/library/<slug>.md`, and install pieces with `npx nowincode add <slug>`.
-- **Remote MCP**: connect MCP-compatible clients (Claude Code, Cursor, Windsurf, etc.) directly to `https://nowincode.com/mcp` (see [docs](https://nowincode.com/docs?utm_source=github)).
+- **Remote MCP**: connect MCP-compatible clients (Claude Code, Cursor, Windsurf, Codex) directly to `https://nowincode.com/mcp` — public discovery tools (`list_tags`, `search_pieces`, `get_piece`) require no login, and `get_source` is included in Pro & Lifetime with no extra MCP fee.
 - **Copyable agent prompts**: paid plans also include structured prompts alongside full source code so coding agents can adapt a piece cleanly into an existing app.
+
+```json
+{
+  "mcpServers": {
+    "nowincode": {
+      "url": "https://nowincode.com/mcp"
+    }
+  }
+}
+```
+
+## Guides & comparisons
+
+- [Guides hub](https://nowincode.com/guides?utm_source=github) — Expo SDK 54 bottom sheets, onboarding & paywalls, Skia shaders, tab bars, swipe card stacks, data viz, and plain Web micro-interactions
+- [Stop generic AI UI in Claude Code & Cursor](https://nowincode.com/guides/best-ui-animation-library-for-claude-code-cursor?utm_source=github) · [Remote MCP for React Native](https://nowincode.com/guides/mcp-server-react-native-ui-components?utm_source=github)
+- Comparisons: [vs Mobbin](https://nowincode.com/guides/now-in-code-vs-mobbin?utm_source=github) · [vs AnimateReactNative](https://nowincode.com/guides/now-in-code-vs-animatereactnative?utm_source=github) · [vs Make It Animated](https://nowincode.com/guides/now-in-code-vs-make-it-animated?utm_source=github) · [vs 60fps.design](https://nowincode.com/guides/now-in-code-vs-60fps-design?utm_source=github) · [vs 21st.dev](https://nowincode.com/guides/now-in-code-vs-21st-dev?utm_source=github)
 
 ## Stack & compatibility
 
